@@ -1,0 +1,33 @@
+{
+  "name": "Shiftr — Plantões Médicos",
+  "short_name": "Shiftr",
+  "description": "Controle inteligente de plantões médicos",
+  "start_url": "/shiftrapp/index.html",
+  "scope": "/shiftrapp/",
+  "display": "standalone",
+  "background_color": "#0f0f11",
+  "theme_color": "#7c6af7",
+  "orientation": "portrait-primary",
+  "lang": "pt-BR",
+  "categories": ["medical", "productivity", "finance"],
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

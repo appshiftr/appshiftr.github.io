@@ -1,0 +1,3997 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Shiftr</title>
+<meta name="description" content="Controle de plantões médicos">
+<meta name="theme-color" content="#0f0f11">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shiftr">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c6af7'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='white' font-family='monospace' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+<script>
+// Registrar Service Worker com detecção de atualização automática
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+
+      // Checa por updates a cada 60 segundos (app aberto em background)
+      setInterval(() => reg.update(), 60000);
+
+      // Detecta quando novo SW está esperando para ativar
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        newWorker.addEventListener('statechange', () => {
+          if(newWorker.state === 'installed' && navigator.serviceWorker.controller){
+            mostrarToastUpdate();
+          }
+        });
+      });
+    }).catch(e => console.warn('SW erro:', e));
+
+    // Quando o SW ativa (depois do usuário aceitar update)
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      window.location.reload();
+    });
+
+    // Mensagem do SW avisando que foi atualizado
+    navigator.serviceWorker.addEventListener('message', e => {
+      if(e.data?.type === 'SW_UPDATED') mostrarToastUpdate();
+    });
+  });
+}
+
+function mostrarToastUpdate(){
+  const toast = document.getElementById('toast-update');
+  if(toast) toast.style.display = 'flex';
+}
+function aplicarUpdate(){
+  navigator.serviceWorker.controller?.postMessage({type:'SKIP_WAITING'});
+  document.getElementById('toast-update').style.display = 'none';
+}
+
+// Banner de instalação PWA
+let _deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredPrompt = e;
+  const btn = document.getElementById('btn-instalar-pwa');
+  if(btn) btn.style.display = 'flex';
+});
+window.addEventListener('appinstalled', () => {
+  _deferredPrompt = null;
+  const btn = document.getElementById('btn-instalar-pwa');
+  if(btn) btn.style.display = 'none';
+  const msg = document.getElementById('pwa-installed-msg');
+  if(msg){ msg.style.display='block'; setTimeout(()=>msg.style.display='none',3000); }
+});
+function instalarPWA(){
+  if(!_deferredPrompt) return;
+  _deferredPrompt.prompt();
+  _deferredPrompt.userChoice.then(()=>{ _deferredPrompt=null; });
+}
+</script>
+<!-- Firebase -->
+<script type="module" id="firebase-init">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, getDocs, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDH8QXbRqYJWXfNJuPzaIZEd35MjXZZjXk",
+  authDomain: "shiftrapp-cbdc2.firebaseapp.com",
+  projectId: "shiftrapp-cbdc2",
+  storageBucket: "shiftrapp-cbdc2.firebasestorage.app",
+  messagingSenderId: "41957390765",
+  appId: "1:41957390765:web:8349c3cbaccd95f4478924"
+};
+
+const app = initializeApp(firebaseConfig);
+
+// App Check — proteção extra: só seu domínio pode usar o Firebase
+// SUBSTITUA pela sua chave reCAPTCHA v3 (ver instruções abaixo)
+initializeAppCheck(app, {
+  provider: new ReCaptchaV3Provider('6LegsSAtAAAAAHoJWU0bhGXO3sgOqVlWn9U50eob'),
+  isTokenAutoRefreshEnabled: true
+});
+
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+window._fb = { auth, db, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, doc, getDoc, setDoc, deleteDoc, getDocs, onSnapshot, collection };
+window._fbReady = true;
+window.dispatchEvent(new Event('fb-ready'));
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+
+:root{
+  --bg:#0f0f11;
+  --surface:#18181c;
+  --surface2:#212127;
+  --surface3:#2a2a32;
+  --border:#2e2e38;
+  --border2:#3d3d4a;
+  --text:#f0eff5;
+  --text2:#9896a8;
+  --text3:#5c5a6e;
+  --accent:#7c6af7;
+  --accent2:#a594ff;
+  --accent-glow:rgba(124,106,247,.18);
+  --sun:#f5a623;
+  --moon:#6ab4f5;
+  --red:#f0506e;
+  --green:#2ec27e;
+  --radius:10px;
+  --radius-lg:16px;
+  --radius-xl:20px;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Inter',sans-serif;
+  --shadow:0 2px 16px rgba(0,0,0,.4);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.6);
+}
+body.light{
+  --bg:#f2f1f7;
+  --surface:#ffffff;
+  --surface2:#ececf3;
+  --surface3:#e2e1ec;
+  --border:#d5d4e0;
+  --border2:#bbbacb;
+  --text:#1a1926;
+  --text2:#6b6882;
+  --text3:#a8a6be;
+  --accent:#5b47e8;
+  --accent2:#7c6af7;
+  --accent-glow:rgba(91,71,232,.12);
+  --shadow:0 2px 12px rgba(0,0,0,.08);
+  --shadow-lg:0 8px 32px rgba(0,0,0,.14);
+}
+
+html{scroll-behavior:smooth;}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;
+  /* iOS safe area no bottom */
+  padding-bottom:env(safe-area-inset-bottom);
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
+
+/* ── LAYOUT ── */
+.layout{display:flex;min-height:100vh;}
+
+/* ══════════════════════════════════════
+   SIDEBAR
+══════════════════════════════════════ */
+.sidebar{
+  width:280px;min-width:280px;
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;overflow-y:auto;z-index:10;
+}
+
+.sb-head{
+  padding:20px 18px 16px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg, var(--surface) 0%, var(--surface2) 100%);
+}
+.sb-logo{
+  font-family:var(--mono);font-size:11px;font-weight:600;
+  letter-spacing:.12em;text-transform:uppercase;
+  color:var(--accent2);margin-bottom:14px;
+  display:flex;align-items:center;gap:7px;
+}
+.sb-logo::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block;box-shadow:0 0 8px var(--accent);}
+.sb-head-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.ano-nav{display:flex;align-items:center;gap:8px;}
+.ano-nav span{font-family:var(--mono);font-size:20px;font-weight:600;color:var(--text);letter-spacing:-.02em;}
+
+.icon-btn{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;width:30px;height:30px;cursor:pointer;
+  color:var(--text2);font-size:14px;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .15s;flex-shrink:0;
+}
+.icon-btn:hover{background:var(--surface3);border-color:var(--border2);color:var(--text);}
+.icon-btn:active{transform:scale(.93);}
+
+.page-nav{display:flex;gap:3px;background:var(--surface2);border-radius:var(--radius);padding:3px;border:1px solid var(--border);}
+.page-btn{
+  flex:1;font-family:var(--mono);font-size:9px;text-transform:uppercase;
+  letter-spacing:.07em;padding:7px 5px;border:none;
+  border-radius:7px;background:transparent;color:var(--text3);
+  cursor:pointer;transition:all .18s;
+}
+.page-btn.active{
+  background:var(--accent);color:#fff;
+  box-shadow:0 2px 12px rgba(124,106,247,.4);
+}
+
+.sb-sec{padding:14px 18px;border-bottom:1px solid var(--border);}
+.sb-title{
+  font-family:var(--mono);font-size:8px;text-transform:uppercase;
+  letter-spacing:.12em;color:var(--text3);margin-bottom:10px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.sb-toggle{background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1;transition:color .12s;}
+.sb-toggle:hover{color:var(--accent2);}
+.sb-collapse{overflow:hidden;}
+
+/* ── HOSPITAL CHIPS ── */
+.hosp-list{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
+.hosp-chip{
+  display:flex;align-items:center;gap:9px;padding:9px 11px;
+  border:1px solid var(--border);border-radius:var(--radius);
+  cursor:pointer;transition:all .15s;background:var(--surface2);
+}
+.hosp-chip:hover{border-color:var(--border2);background:var(--surface3);}
+.hosp-chip.selected{background:var(--surface3);border-width:1.5px;}
+.hosp-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.hosp-name{font-size:13px;font-weight:500;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+.hosp-edit-btn{background:none;border:none;cursor:pointer;color:var(--text3);font-size:13px;padding:2px;transition:color .12s;flex-shrink:0;line-height:1;}
+.hosp-edit-btn:hover{color:var(--accent2);}
+.btn-add-hosp{
+  width:100%;font-family:var(--mono);font-size:9px;text-transform:uppercase;
+  letter-spacing:.07em;padding:9px;background:transparent;
+  border:1px dashed var(--border2);border-radius:var(--radius);
+  cursor:pointer;color:var(--text3);transition:all .15s;
+}
+.btn-add-hosp:hover{background:var(--surface2);color:var(--accent2);border-color:var(--accent);}
+
+/* ── TURNO SELECTOR ── */
+.turno-group{display:flex;gap:4px;margin-bottom:10px;}
+.turno-btn{
+  flex:1;font-family:var(--mono);font-size:10px;padding:8px 4px;
+  border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--surface2);color:var(--text3);cursor:pointer;
+  transition:all .15s;text-align:center;
+}
+.turno-btn:hover{background:var(--surface3);color:var(--text2);}
+.turno-btn.active{background:var(--surface3);color:var(--text);border-color:var(--border2);}
+.turno-custom{display:none;gap:7px;align-items:center;margin-bottom:10px;}
+.turno-custom.show{display:flex;}
+.turno-custom input{
+  flex:1;font-family:var(--mono);font-size:12px;padding:6px 9px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius);color:var(--text);outline:none;min-width:0;
+}
+.turno-custom input:focus{border-color:var(--accent);}
+.turno-custom span{font-family:var(--mono);font-size:11px;color:var(--text3);}
+
+/* ── METRICS ── */
+.metric-col{display:flex;flex-direction:column;gap:5px;}
+.metric{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius);padding:8px 11px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.metric-label{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);}
+.metric-value{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent2);}
+
+.empty-state{font-size:12px;color:var(--text3);padding:10px;text-align:center;font-family:var(--mono);}
+
+/* ── MINI CAL ── */
+.mini-range-wrap{display:flex;flex-direction:column;gap:7px;}
+.mini-range-labels{display:flex;justify-content:space-between;gap:6px;}
+.mini-range-lbl{
+  font-family:var(--mono);font-size:10px;color:var(--text3);
+  background:var(--surface2);border-radius:var(--radius);
+  padding:5px 8px;flex:1;text-align:center;border:1px solid var(--border);
+  transition:all .15s;
+}
+.mini-range-lbl.set{color:var(--accent2);border-color:var(--accent);}
+.mini-cal-nav{display:flex;align-items:center;justify-content:space-between;}
+.mini-cal-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-top:6px;}
+.mini-cal-dow span{font-family:var(--mono);font-size:8px;color:var(--text3);text-align:center;padding:2px 0;}
+.mini-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-top:3px;}
+.mini-day{font-family:var(--mono);font-size:10px;text-align:center;padding:4px 2px;border-radius:5px;cursor:pointer;color:var(--text2);transition:all .1s;border:1px solid transparent;}
+.mini-day:hover{background:var(--surface3);color:var(--text);}
+.mini-day.empty{cursor:default;visibility:hidden;}
+.mini-day.today{border-color:var(--accent);color:var(--accent2);}
+.mini-day.in-range{background:var(--accent-glow);}
+.mini-day.range-start,.mini-day.range-end{background:var(--accent);color:#fff;border-color:var(--accent);}
+.mini-day.has-plantao::after{content:'';display:block;width:3px;height:3px;border-radius:50%;background:var(--accent2);margin:1px auto 0;}
+.btn-sm{
+  width:100%;margin-top:6px;font-family:var(--mono);font-size:9px;
+  text-transform:uppercase;letter-spacing:.06em;padding:8px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius);cursor:pointer;color:var(--text2);transition:all .15s;
+}
+.btn-sm:hover{background:var(--surface3);border-color:var(--border2);color:var(--text);}
+.sum-result{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent2);margin-top:8px;display:none;}
+.sum-error{font-family:var(--mono);font-size:10px;color:var(--red);margin-top:5px;display:none;}
+
+/* ── PREVISÃO ── */
+.prev-list{display:flex;flex-direction:column;gap:6px;}
+.prev-item{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface2);}
+.prev-hdr{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--surface3);}
+.prev-periodo{font-family:var(--mono);font-size:9px;color:var(--text3);}
+.prev-badge{font-family:var(--mono);font-size:8px;font-weight:600;padding:2px 8px;border-radius:20px;letter-spacing:.04em;}
+.badge-pago{background:rgba(46,194,126,.15);color:var(--green);}
+.badge-aguard{background:rgba(245,166,35,.12);color:var(--sun);}
+.badge-aberto{background:rgba(124,106,247,.12);color:var(--accent2);}
+.badge-parcial{background:rgba(106,180,245,.12);color:var(--moon);}
+.prev-body{padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:4px;}
+.prev-pgto{font-family:var(--mono);font-size:10px;color:var(--text2);}
+.prev-pgto strong{color:var(--text);font-size:11px;}
+.prev-val{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;text-align:right;}
+.prev-val.parcial{color:var(--moon);}
+.prev-dias{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px;}
+.btn-pdf{font-family:var(--mono);font-size:8px;text-transform:uppercase;letter-spacing:.05em;padding:3px 8px;background:none;border:1px solid var(--border2);border-radius:5px;cursor:pointer;color:var(--text3);transition:all .12s;white-space:nowrap;}
+.btn-pdf:hover{background:var(--surface3);color:var(--text);border-color:var(--accent);}
+
+/* ── PERFIL ── */
+.perfil-avatar{
+  width:36px;height:36px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:#fff;
+  cursor:pointer;flex-shrink:0;transition:opacity .15s;
+  box-shadow:0 0 16px var(--accent-glow);
+}
+.perfil-avatar:hover{opacity:.85;}
+.perfil-avatar.sem-perfil{background:var(--surface2);color:var(--text3);box-shadow:none;border:1px dashed var(--border2);}
+.perfil-nome{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;}
+.perfil-esp{font-family:var(--mono);font-size:9px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;margin-top:1px;}
+
+/* ── PREV POR HOSPITAL ── */
+.prev-hosp-block{margin-bottom:14px;}
+.prev-hosp-hdr{display:flex;align-items:center;gap:7px;margin-bottom:6px;cursor:pointer;user-select:none;}
+.prev-hosp-hdr:hover .prev-hosp-nome{color:var(--text);}
+.prev-hosp-toggle{background:none;border:none;cursor:pointer;color:var(--text3);font-size:12px;padding:0;margin-left:auto;transition:color .12s;flex-shrink:0;}
+.prev-hosp-toggle:hover{color:var(--accent2);}
+.prev-hosp-body{overflow:hidden;}
+.prev-hosp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.prev-hosp-nome{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--text2);flex:1;letter-spacing:.03em;}
+.prev-hosp-regras-btn{font-family:var(--mono);font-size:8px;background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;cursor:pointer;color:var(--text3);transition:all .12s;white-space:nowrap;}
+.prev-hosp-regras-btn:hover{background:var(--surface2);color:var(--text2);}
+.prev-hosp-regras-btn.ativo{background:var(--surface2);color:var(--text);border-color:var(--border2);}
+.prev-hosp-regras{display:none;background:var(--surface2);border-radius:var(--radius);padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);}
+.prev-hosp-regras.open{display:block;}
+.prev-hosp-regras-titulo{font-family:var(--mono);font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;}
+.prev-hosp-regras .field{margin-bottom:6px;}
+.prev-hosp-regras .field:last-of-type{margin-bottom:0;}
+.prev-hosp-regras label{font-size:10px;min-width:90px;color:var(--text2);}
+.prev-hosp-regras input[type=number]{font-size:11px;padding:3px 7px;width:54px;flex:none;}
+.prev-resumo-regra{font-family:var(--mono);font-size:9px;color:var(--accent2);margin-top:8px;line-height:1.6;padding:5px 8px;background:var(--surface);border-radius:5px;border:1px solid var(--border);}
+
+/* ── ACTIONS ── */
+.action-row{display:flex;gap:6px;}
+.btn-action{
+  flex:1;font-family:var(--mono);font-size:9px;text-transform:uppercase;
+  letter-spacing:.06em;padding:9px 4px;border-radius:var(--radius);
+  border:1px solid var(--border);cursor:pointer;transition:all .15s;
+  background:var(--surface2);color:var(--text2);
+}
+.btn-action:hover{background:var(--surface3);border-color:var(--border2);color:var(--text);}
+.btn-action.danger:hover{background:rgba(240,80,110,.1);border-color:var(--red);color:var(--red);}
+
+/* ── LEGEND ── */
+.legend{display:flex;flex-wrap:wrap;gap:6px;}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);}
+.leg-dot{width:10px;height:10px;border-radius:3px;border:1px solid;flex-shrink:0;}
+
+/* ══════════════════════════════════════
+   MAIN CONTENT
+══════════════════════════════════════ */
+.main-content{flex:1;overflow-y:auto;background:var(--bg);height:100vh;}
+
+/* ── TOPBAR ── */
+.main-topbar{
+  position:sticky;top:0;z-index:50;
+  background:var(--bg);
+  border-bottom:1px solid var(--border);
+  padding:14px 20px;
+  display:flex;align-items:center;justify-content:space-between;
+  gap:12px;
+  backdrop-filter:blur(12px);
+}
+.year-label{
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--text3);
+}
+
+/* ── PÁGINAS ── */
+.page{display:none;flex:1;flex-direction:column;}
+.page.active{display:flex;}
+
+/* ── MONTHS GRID → 1 coluna mobile-first ── */
+.months-grid{
+  display:flex;flex-direction:column;
+  gap:0;
+  padding:0 0 80px;
+}
+
+/* ── MONTH CARD ── */
+.month-card{
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  padding:20px 20px 16px;
+  transition:background .15s;
+  scroll-margin-top:56px;
+}
+.month-card:first-child{border-top:1px solid var(--border);}
+.month-card.current-month{background:var(--surface);}
+.month-card.current-month .mc-title{color:var(--accent2);}
+
+.mc-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:8px;}
+.mc-title{
+  font-family:var(--mono);font-size:18px;font-weight:600;
+  color:var(--text);letter-spacing:-.02em;line-height:1;
+}
+.mc-month-num{
+  font-family:var(--mono);font-size:11px;color:var(--text3);
+  margin-top:3px;display:block;
+}
+.mc-totals{display:flex;flex-direction:column;align-items:flex-end;gap:3px;}
+.mc-hosp-line{font-family:var(--mono);font-size:10px;color:var(--text2);display:flex;align-items:center;gap:4px;font-weight:500;}
+.mc-hosp-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.mc-total-sum{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--accent2);}
+
+.mc-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;}
+.mc-dow-cell{
+  font-family:var(--mono);font-size:9px;color:var(--text3);
+  text-align:center;padding:4px 0;text-transform:uppercase;letter-spacing:.04em;
+}
+.mc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+
+.mc-day{
+  border:1px solid var(--border);border-radius:8px;
+  min-height:56px;padding:5px 5px 4px;
+  cursor:pointer;transition:all .12s;
+  position:relative;background:var(--surface2);overflow:hidden;
+}
+.mc-day:hover{border-color:var(--accent);background:var(--surface3);transform:translateY(-1px);box-shadow:0 4px 14px rgba(124,106,247,.15);}
+.mc-day:active{transform:scale(.96);}
+.mc-day.mc-empty{cursor:default;border-color:transparent;background:transparent;transform:none!important;box-shadow:none!important;}
+.mc-day.mc-today{border-color:var(--accent);border-width:1.5px;box-shadow:0 0 0 2px var(--accent-glow);}
+.mc-day.mc-weekend{background:var(--surface);}
+.mc-day.mc-weekend .mc-dnum{color:var(--text3);}
+.mc-dnum{
+  font-family:var(--mono);font-size:10px;font-weight:600;
+  color:var(--text2);line-height:1;position:relative;z-index:4;
+}
+
+/* Plantões no dia — metades coloridas */
+.mc-halves{position:absolute;inset:0;border-radius:7px;overflow:hidden;display:flex;}
+.mc-half{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;opacity:.92;gap:2px;}
+.mc-half-icon{font-size:14px;line-height:1;}
+.mc-half-lbl{font-family:var(--mono);font-size:7px;font-weight:600;opacity:.85;letter-spacing:.02em;}
+.mc-divider{width:1.5px;background:rgba(255,255,255,.3);position:absolute;left:50%;top:8px;bottom:8px;border-radius:1px;z-index:3;}
+.mc-half-full{position:absolute;inset:0;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;opacity:.92;}
+.mc-dnum{position:relative;z-index:4;}
+
+/* ── MODAL ── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:500;align-items:flex-end;justify-content:center;padding:0;}
+.modal-overlay.open{display:flex;}
+.modal{
+  background:var(--surface);
+  border-radius:var(--radius-xl) var(--radius-xl) 0 0;
+  border:1px solid var(--border);border-bottom:none;
+  padding:24px 20px 32px;
+  width:100%;max-width:480px;max-height:92vh;overflow-y:auto;
+  box-shadow:var(--shadow-lg);
+  animation:slideUp .22s cubic-bezier(.4,0,.2,1);
+}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+.modal-drag{width:40px;height:4px;border-radius:2px;background:var(--border2);margin:0 auto 18px;}
+.modal-title{
+  font-family:var(--mono);font-size:15px;font-weight:600;
+  margin-bottom:18px;color:var(--text);letter-spacing:-.01em;
+}
+.modal-field{margin-bottom:12px;}
+.modal-field label{
+  display:block;font-family:var(--mono);font-size:9px;
+  text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:5px;
+}
+.modal-field input,.modal-field select{
+  width:100%;font-family:var(--mono);font-size:13px;padding:10px 12px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius);color:var(--text);outline:none;
+  transition:border-color .15s;
+}
+.modal-field input:focus,.modal-field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
+.modal-actions{display:flex;gap:8px;margin-top:18px;}
+.btn-primary{
+  flex:1;font-family:var(--mono);font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;padding:12px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;border:none;border-radius:var(--radius);cursor:pointer;
+  transition:opacity .15s;font-weight:600;
+  box-shadow:0 4px 16px rgba(124,106,247,.35);
+}
+.btn-primary:hover{opacity:.88;}
+.btn-primary:active{transform:scale(.97);}
+.btn-secondary{
+  flex:1;font-family:var(--mono);font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;padding:12px;background:var(--surface2);
+  color:var(--text2);border:1px solid var(--border);
+  border-radius:var(--radius);cursor:pointer;transition:all .15s;
+}
+.btn-secondary:hover{background:var(--surface3);border-color:var(--border2);color:var(--text);}
+.btn-danger-sm{
+  font-family:var(--mono);font-size:9px;text-transform:uppercase;
+  padding:7px 12px;background:none;color:var(--red);
+  border:1px solid rgba(240,80,110,.35);border-radius:var(--radius);
+  cursor:pointer;margin-top:10px;width:100%;transition:all .15s;letter-spacing:.05em;
+}
+.btn-danger-sm:hover{background:rgba(240,80,110,.1);border-color:var(--red);}
+
+/* Hospital picker no modal */
+.hosp-picker{display:flex;flex-direction:column;gap:7px;margin-bottom:14px;}
+.hosp-pick-item{
+  display:flex;align-items:center;gap:11px;padding:11px 13px;
+  border:1.5px solid var(--border);border-radius:var(--radius);
+  cursor:pointer;transition:all .15s;background:var(--surface2);
+}
+.hosp-pick-item:hover{border-color:var(--border2);background:var(--surface3);}
+.hosp-pick-item.selected{background:var(--surface3);box-shadow:0 0 0 2px var(--accent-glow);}
+.hosp-pick-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+.hosp-pick-info{flex:1;}
+.hosp-pick-name{font-size:13px;font-weight:600;color:var(--text);}
+.hosp-pick-val{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px;}
+.valor-preview{
+  font-family:var(--mono);font-size:12px;color:var(--accent2);
+  font-weight:600;margin-top:5px;min-height:18px;
+  padding:6px 10px;background:var(--accent-glow);
+  border-radius:6px;border:1px solid rgba(124,106,247,.2);
+}
+
+/* ── MOBILE TOPBAR ── */
+.topbar-mobile{
+  display:none;position:sticky;top:0;z-index:100;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  padding:12px 16px;
+  padding-top:max(12px, env(safe-area-inset-top));
+  align-items:center;justify-content:space-between;gap:10px;
+  backdrop-filter:blur(12px);
+}
+.tb-logo{
+  font-family:var(--mono);font-size:10px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--accent2);
+  display:flex;align-items:center;gap:6px;
+}
+.tb-logo::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);display:inline-block;}
+.tb-right{display:flex;align-items:center;gap:6px;}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;}
+.sidebar-overlay.open{display:block;}
+
+/* ── REGRAS ── */
+.regras-painel{display:none;margin-bottom:10px;background:var(--surface2);border-radius:var(--radius);padding:12px;border:1px solid var(--border);}
+.field{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+.field:last-child{margin-bottom:0;}
+.field label{font-family:var(--mono);font-size:10px;color:var(--text2);min-width:90px;}
+.field input[type=number]{
+  font-family:var(--mono);font-size:12px;flex:1;padding:6px 8px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);color:var(--text);outline:none;
+}
+.field input[type=number]:focus{border-color:var(--accent);}
+
+/* ── DASHBOARD ── */
+.dash-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:16px;}
+.dash-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;}
+.dash-card-title{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);margin-bottom:12px;}
+.dash-big-val{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--accent2);line-height:1;}
+.dash-sub{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:5px;}
+.dash-hosp-row{display:flex;align-items:center;gap:7px;padding:6px 0;border-bottom:1px solid var(--border);}
+.dash-hosp-row:last-child{border-bottom:none;}
+.dash-hosp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.dash-hosp-nome{font-size:12px;flex:1;color:var(--text2);}
+.dash-hosp-val{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);}
+.dash-hosp-pct{font-family:var(--mono);font-size:10px;color:var(--text3);min-width:36px;text-align:right;}
+.dash-bar-wrap{margin-top:6px;}
+.dash-bar-bg{background:var(--surface2);border-radius:4px;height:5px;overflow:hidden;margin-top:4px;}
+.dash-bar-fill{height:100%;border-radius:4px;transition:width .5s cubic-bezier(.4,0,.2,1);}
+.month-bars{display:flex;align-items:flex-end;gap:4px;height:160px;border-bottom:1px solid var(--border);margin-bottom:6px;padding-top:28px;}
+.month-bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;position:relative;}
+.month-bar-col{width:100%;display:flex;flex-direction:column;justify-content:flex-end;gap:1px;border-radius:4px 4px 0 0;overflow:hidden;}
+.month-bar-seg{width:100%;min-height:2px;border-radius:4px 4px 0 0;transition:height .5s;}
+.month-bar-seg:hover{filter:brightness(1.2);}
+.month-bar-lbl{font-family:var(--mono);font-size:7px;color:var(--text3);margin-top:5px;text-align:center;}
+.month-bar-val{font-family:var(--mono);font-size:8px;font-weight:600;color:var(--text2);position:absolute;bottom:100%;left:50%;transform:translateX(-50%) translateY(-2px);white-space:nowrap;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:2px 5px;pointer-events:none;}
+.dash-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;}
+.dash-table th{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3);padding:7px 6px;text-align:left;border-bottom:1px solid var(--border);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dash-table td{padding:7px 6px;border-bottom:1px solid var(--border);color:var(--text2);font-size:11px;overflow:hidden;text-overflow:ellipsis;}
+.dash-table tr:last-child td{border-bottom:none;}
+.dash-table tr:hover td{background:var(--surface2);}
+.tag{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:10px;font-weight:600;}
+.tag-diurno{background:rgba(245,166,35,.15);color:var(--sun);}
+.tag-noturno{background:rgba(106,180,245,.15);color:var(--moon);}
+.tag-custom{background:var(--surface2);color:var(--text3);}
+.dash-2col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+.dash-3col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
+
+/* ── DOCUMENTOS ── */
+.doc-item{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--surface2);margin-bottom:5px;cursor:pointer;
+  transition:all .15s;
+}
+.doc-item:hover{border-color:var(--border2);background:var(--surface3);}
+.doc-item.vencido{border-color:var(--red);background:rgba(240,80,110,.07);}
+.doc-item.alerta{border-color:var(--sun);background:rgba(245,166,35,.07);}
+.doc-item.ok{border-color:var(--green);background:rgba(46,194,126,.06);}
+.doc-icon{font-size:16px;flex-shrink:0;}
+.doc-info{flex:1;min-width:0;}
+.doc-nome{font-size:12px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.doc-inst{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:1px;}
+.doc-val{font-family:var(--mono);font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0;}
+.doc-val.vencido{color:var(--red);}
+.doc-val.alerta{color:var(--sun);}
+.doc-val.ok{color:var(--green);}
+
+/* ── ALERTAS ── */
+.alerta-item{
+  display:flex;gap:12px;padding:12px 14px;
+  border-radius:var(--radius);margin-bottom:8px;
+  border:1px solid;
+}
+.alerta-item.critico{background:rgba(240,80,110,.1);border-color:rgba(240,80,110,.4);}
+.alerta-item.aviso{background:rgba(245,166,35,.1);border-color:rgba(245,166,35,.4);}
+.alerta-item.ir{background:rgba(124,106,247,.1);border-color:rgba(124,106,247,.4);}
+.alerta-emoji{font-size:20px;flex-shrink:0;line-height:1.4;}
+.alerta-texto{flex:1;}
+.alerta-titulo{font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px;}
+.alerta-sub{font-family:var(--mono);font-size:10px;color:var(--text2);line-height:1.5;}
+@media(max-width:768px){
+  .topbar-mobile{display:flex;}
+  .layout{flex-direction:column;}
+  .sidebar{
+    position:fixed;left:0;top:0;bottom:0;z-index:300;
+    transform:translateX(-100%);
+    transition:transform .28s cubic-bezier(.4,0,.2,1);
+    height:100vh;width:290px;min-width:290px;
+    box-shadow:6px 0 32px rgba(0,0,0,.4);
+  }
+  .sidebar.open{transform:translateX(0);}
+  .main-content{padding:0;}
+  .main-topbar{display:none;}
+  .month-card{padding:16px 14px 14px;}
+  .mc-day{min-height:48px;}
+  .mc-title{font-size:16px;}
+  .mc-total-sum{font-size:13px;}
+  .dash-grid{grid-template-columns:1fr 1fr;}
+  .dash-2col{grid-template-columns:1fr;}
+  .dash-3col{grid-template-columns:1fr;}
+  .dash-big-val{font-size:20px;}
+  .dash-card{padding:14px;}
+  .dash-table th,.dash-table td{padding:6px 7px;font-size:11px;}
+  #page-dash{padding:14px;}
+}
+@media(max-width:480px){
+  .dash-grid{grid-template-columns:1fr;}
+  .mc-day{min-height:42px;}
+  .modal{border-radius:var(--radius-xl) var(--radius-xl) 0 0;}
+}
+/* ══════════════════════════════════════
+   LOGIN SCREEN
+══════════════════════════════════════ */
+#login-screen{
+  display:none;position:fixed;inset:0;z-index:9999;
+  background:var(--bg);
+  flex-direction:column;align-items:center;justify-content:center;
+  padding:32px 24px;
+}
+#login-screen.visible{display:flex;}
+.login-card{
+  width:100%;max-width:380px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-xl);
+  padding:36px 28px;
+  box-shadow:var(--shadow-lg);
+  display:flex;flex-direction:column;align-items:center;gap:0;
+}
+.login-logo{
+  width:64px;height:64px;border-radius:18px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:28px;font-weight:700;color:#fff;
+  box-shadow:0 8px 24px var(--accent-glow);
+  margin-bottom:20px;letter-spacing:-.03em;
+}
+.login-title{
+  font-family:var(--mono);font-size:22px;font-weight:700;
+  color:var(--text);letter-spacing:-.02em;margin-bottom:6px;
+}
+.login-sub{
+  font-size:13px;color:var(--text3);text-align:center;
+  margin-bottom:32px;line-height:1.5;
+}
+.btn-google{
+  width:100%;display:flex;align-items:center;justify-content:center;gap:12px;
+  padding:14px 20px;border-radius:var(--radius);
+  background:var(--surface2);border:1px solid var(--border2);
+  cursor:pointer;transition:all .18s;
+  font-family:var(--sans);font-size:14px;font-weight:500;color:var(--text);
+}
+.btn-google:hover{background:var(--surface3);border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 16px var(--accent-glow);}
+.btn-google:active{transform:scale(.97);}
+.btn-google svg{width:20px;height:20px;flex-shrink:0;}
+.login-footer{
+  margin-top:24px;font-size:11px;color:var(--text3);text-align:center;line-height:1.6;
+}
+.login-error{
+  margin-top:14px;padding:10px 14px;border-radius:var(--radius);
+  background:rgba(240,80,110,.1);border:1px solid rgba(240,80,110,.3);
+  color:var(--red);font-size:12px;font-family:var(--mono);
+  display:none;text-align:center;width:100%;
+}
+.login-loading{
+  display:none;flex-direction:column;align-items:center;gap:12px;margin-top:14px;
+}
+.login-loading.show{display:flex;}
+.spinner{
+  width:24px;height:24px;border:2px solid var(--border2);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+.sync-bar{
+  position:fixed;bottom:16px;right:16px;z-index:999;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius);padding:8px 14px;
+  font-family:var(--mono);font-size:10px;color:var(--text3);
+  display:none;align-items:center;gap:8px;
+  box-shadow:var(--shadow);
+}
+.sync-bar.show{display:flex;}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 1.2s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+</style>
+</head>
+<body>
+
+<!-- TELA DE LOGIN -->
+<div id="login-screen" class="visible">
+  <div class="login-card">
+    <div class="login-logo">S</div>
+    <div class="login-title">Shiftr</div>
+    <div class="login-sub">Controle inteligente de plantões médicos.<br>Entre com sua conta Google para continuar.</div>
+    <button class="btn-google" onclick="loginGoogle()">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+      </svg>
+      Entrar com Google
+    </button>
+    <div class="login-loading" id="login-loading">
+      <div class="spinner"></div>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">Aguardando autenticação...</span>
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <div class="login-footer">Seus dados são privados e criptografados.<br>Apenas você tem acesso às suas informações.</div>
+  </div>
+</div>
+
+<!-- BARRA DE SYNC -->
+<div class="sync-bar" id="sync-bar">
+  <div class="sync-dot"></div>
+  <span id="sync-msg">Sincronizando...</span>
+</div>
+
+<!-- TOAST DE ATUALIZAÇÃO -->
+<div id="toast-update" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9998;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;box-shadow:var(--shadow-lg);align-items:center;gap:12px;font-family:var(--mono);font-size:11px;color:var(--text);white-space:nowrap;">
+  <span>🔄 Nova versão disponível</span>
+  <button onclick="aplicarUpdate()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 12px;font-family:var(--mono);font-size:10px;cursor:pointer;font-weight:600;">Atualizar</button>
+  <button onclick="document.getElementById('toast-update').style.display='none'" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
+</div>
+
+<!-- Mobile topbar -->
+<div class="topbar-mobile">
+  <span class="tb-logo">Shiftr</span>
+  <div class="tb-right">
+    <button class="icon-btn" onclick="toggleDark()" id="btn-dark-m">☀</button>
+    <div id="tb-avatar" class="perfil-avatar sem-perfil" onclick="abrirModalPerfil()" title="Perfil" style="width:30px;height:30px;font-size:11px;">&#128100;</div>
+    <button class="icon-btn" onclick="abrirMenu()">&#9776;</button>
+  </div>
+</div>
+<div class="sidebar-overlay" id="sb-overlay" onclick="fecharMenu()"></div>
+
+<!-- Modal Meta -->
+<div class="modal-overlay" id="modal-meta">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <div class="modal-title">🎯 Configurar meta</div>
+    <div class="modal-field">
+      <label>Meta anual (R$) — atualiza automaticamente ao editar meses</label>
+      <input type="number" id="meta-anual" min="0" step="1000" placeholder="Ex: 408000" oninput="metaAnualChanged()">
+    </div>
+    <div id="meta-meses-wrap" style="margin-top:4px;">
+      <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:8px;">Ajuste por mês — editar um mês recalcula o total anual automaticamente</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;" id="meta-meses-grid"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="fecharModalMeta()">Cancelar</button>
+      <button class="btn-primary" onclick="confirmarMeta()">Salvar meta</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal documento -->
+<div class="modal-overlay" id="modal-doc">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <div class="modal-title" id="md-title">Novo documento</div>
+    <div class="modal-field">
+      <label>Tipo</label>
+      <select id="md-tipo" style="font-family:var(--mono);font-size:12px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;width:100%;cursor:pointer;">
+        <option value="curso">📋 Curso / Certificado</option>
+        <option value="crm">🪪 CRM / Registro</option>
+        <option value="rqe">🏅 RQE / Especialidade</option>
+        <option value="alvara">📄 Alvará / Licença</option>
+        <option value="outros">📎 Outros</option>
+      </select>
+    </div>
+    <div class="modal-field"><label>Nome do documento</label><input type="text" id="md-nome" placeholder="Ex: BLS — Suporte Básico de Vida"></div>
+    <div class="modal-field"><label>Instituição</label><input type="text" id="md-inst" placeholder="Ex: AHA, CFM, CRM-SP..."></div>
+    <div class="modal-field"><label>Data de validade</label><input type="date" id="md-val"></div>
+
+    <!-- Upload de arquivo -->
+    <div class="modal-field">
+      <label>Arquivo (PDF ou imagem — máx. 500KB)</label>
+      <div id="md-upload-area" onclick="document.getElementById('md-file').click()" style="
+        border:2px dashed var(--border2);border-radius:var(--radius);
+        padding:16px;text-align:center;cursor:pointer;transition:all .15s;
+        background:var(--surface2);">
+        <input type="file" id="md-file" accept=".pdf,image/*" style="display:none" onchange="handleDocFile(event)">
+        <div id="md-upload-label">
+          <div style="font-size:24px;margin-bottom:6px;">📁</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">Toque para selecionar</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px;">PDF, JPG, PNG até 500KB</div>
+        </div>
+      </div>
+      <!-- Preview do arquivo -->
+      <div id="md-file-preview" style="display:none;margin-top:8px;padding:10px 12px;background:var(--surface3);border-radius:var(--radius);border:1px solid var(--border);display:none;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="md-file-icon" style="font-size:20px;">📄</span>
+          <div style="flex:1;min-width:0;">
+            <div id="md-file-name" style="font-size:12px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+            <div id="md-file-size" style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px;"></div>
+          </div>
+          <button onclick="removerArquivoDoc()" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:2px;flex-shrink:0;">✕</button>
+        </div>
+      </div>
+      <div id="md-file-erro" style="font-family:var(--mono);font-size:10px;color:var(--red);margin-top:5px;display:none;"></div>
+    </div>
+
+    <div id="md-erro" style="font-family:var(--mono);font-size:10px;color:var(--red);margin-bottom:8px;display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="fecharModalDoc()">Cancelar</button>
+      <button class="btn-primary" id="md-btn-salvar" onclick="salvarDoc()">Salvar</button>
+    </div>
+    <!-- Ações do documento existente -->
+    <div id="md-acoes-existente" style="display:none;margin-top:10px;display:none;">
+      <div style="display:flex;gap:6px;">
+        <button onclick="verDocumento()" style="flex:1;font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.05em;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--text2);">👁 Visualizar</button>
+        <button onclick="baixarDocumento()" style="flex:1;font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.05em;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--text2);">⬇ Baixar</button>
+      </div>
+    </div>
+    <button class="btn-danger-sm" id="md-del" style="display:none" onclick="excluirDoc()">Excluir documento</button>
+  </div>
+</div>
+
+<!-- Painel de alertas -->
+<div id="painel-alertas" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9997;background:var(--surface);border-bottom:2px solid var(--accent);box-shadow:var(--shadow-lg);max-height:85vh;overflow-y:auto;">
+  <div style="padding:16px 18px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;">🔔</span> Alertas pendentes
+      </div>
+      <button onclick="fecharAlertas()" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:18px;line-height:1;">✕</button>
+    </div>
+    <div id="alertas-content"></div>
+    <button onclick="fecharAlertas()" style="width:100%;margin-top:12px;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--text2);">Entendi</button>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-hosp">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <div class="modal-title" id="mh-title">Novo hospital</div>
+    <div class="modal-field"><label>Nome</label><input type="text" id="mh-nome" placeholder="Ex: Hospital das Clínicas"></div>
+    <div class="modal-field">
+      <label>Cor</label>
+      <select id="mh-cor" onchange="validarCorHosp()" style="font-family:var(--mono);font-size:12px;padding:7px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;width:100%;cursor:pointer;"></select>
+      <div id="mh-cor-aviso" style="font-family:var(--mono);font-size:10px;color:#c0392b;margin-top:4px;display:none">Cor já usada por outro hospital.</div>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin:10px 0 6px;padding-top:8px;border-top:1px solid var(--border)">Valores plantão 12h (R$)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div class="modal-field"><label>☀ Diurno — semana</label><input type="number" id="mh-ds" min="0" step="10" placeholder="0,00" oninput="atualizarValoresHora()"></div>
+      <div class="modal-field"><label>☀ Diurno — FDS</label><input type="number" id="mh-df" min="0" step="10" placeholder="0,00" oninput="atualizarValoresHora()"></div>
+      <div class="modal-field"><label>☽ Noturno — semana</label><input type="number" id="mh-ns" min="0" step="10" placeholder="0,00" oninput="atualizarValoresHora()"></div>
+      <div class="modal-field"><label>☽ Noturno — FDS</label><input type="number" id="mh-nf" min="0" step="10" placeholder="0,00" oninput="atualizarValoresHora()"></div>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin:10px 0 6px;padding-top:8px;border-top:1px solid var(--border)">Valor hora — calculado automaticamente (÷12)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div class="modal-field">
+        <label>☀ Diurno</label>
+        <input type="text" id="mh-hd" readonly placeholder="—" style="opacity:.6;cursor:default;background:var(--surface3);">
+      </div>
+      <div class="modal-field">
+        <label>☽ Noturno</label>
+        <input type="text" id="mh-hn" readonly placeholder="—" style="opacity:.6;cursor:default;background:var(--surface3);">
+      </div>
+    </div>
+    <!-- Regime tributário -->
+    <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin:10px 0 6px;padding-top:8px;border-top:1px solid var(--border)">Regime tributário</div>
+    <div class="modal-field">
+      <label>Tipo de contratação</label>
+      <select id="mh-regime" onchange="toggleRegimeIR()" style="font-family:var(--mono);font-size:12px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;width:100%;cursor:pointer;">
+        <option value="empresa">🏢 Empresa intermediária (IR gerenciado pela empresa)</option>
+        <option value="cnpj">🏛 CNPJ próprio — alíquota fixa</option>
+        <option value="pf">👤 Pessoa física — tabela progressiva</option>
+      </select>
+    </div>
+    <div id="mh-ir-cnpj" style="display:none;">
+      <div class="modal-field">
+        <label>Alíquota IR (%)</label>
+        <input type="number" id="mh-aliq" min="0" max="100" step="0.1" placeholder="Ex: 6 para Simples Nacional" style="font-family:var(--mono);font-size:13px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;width:100%;">
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);padding:4px 0 8px;">Ex: 6% Simples Nacional · 11.33% Lucro Presumido</div>
+    </div>
+    <div id="mh-ir-pf" style="display:none;">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--accent2);padding:8px 10px;background:var(--accent-glow);border-radius:var(--radius);border:1px solid rgba(124,106,247,.2);">
+        📊 Tabela progressiva 2026 aplicada automaticamente por ciclo de pagamento.<br>
+        <span style="color:var(--text3);font-size:9px;">Isenção até R$ 5.000 · Redutor até R$ 7.350 · Máx 27,5%</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="fecharModalHosp()">Cancelar</button>
+      <button class="btn-primary" onclick="salvarHosp()">Salvar</button>
+    </div>
+    <button class="btn-danger-sm" id="mh-del" style="display:none" onclick="deletarHosp()">Excluir hospital</button>
+  </div>
+</div>
+
+<!-- Modal plantão -->
+<div class="modal-overlay" id="modal-plantao">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <div class="modal-title" id="mp-title">Registrar plantão</div>
+
+    <!-- Plantões já existentes neste dia -->
+    <div id="mp-existentes-wrap" style="display:none;margin-bottom:12px;">
+      <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:6px;">Plantões neste dia</div>
+      <div id="mp-existentes"></div>
+      <div style="border-top:1px solid var(--border);margin:10px 0 10px;"></div>
+      <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:6px;">Adicionar novo plantão</div>
+    </div>
+
+    <div class="modal-field"><label>Hospital</label>
+      <div class="hosp-picker" id="mp-hosp-picker"></div>
+    </div>
+    <div class="modal-field"><label>Turno</label>
+      <div class="turno-group">
+        <button class="turno-btn active" id="tp-diurno" onclick="setTurnoModal('Diurno')">☀ Diurno 7–19</button>
+        <button class="turno-btn" id="tp-noturno" onclick="setTurnoModal('Noturno')">☽ Noturno 19–7</button>
+        <button class="turno-btn" id="tp-custom" onclick="setTurnoModal('Custom')">&#9997; Custom</button>
+      </div>
+    </div>
+    <div class="turno-custom" id="tc-custom">
+      <input type="time" id="tc-ini" value="07:00">
+      <span>até</span>
+      <input type="time" id="tc-fim" value="19:00">
+    </div>
+    <div class="turno-custom" id="tc-valor-custom" style="flex-direction:column;gap:4px;">
+      <div style="display:flex;align-items:center;gap:8px;width:100%;">
+        <label style="font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);white-space:nowrap;">Valor (R$)</label>
+        <input type="number" id="tc-valor" min="0" step="1" placeholder="calculado auto" style="flex:1;font-family:var(--mono);font-size:13px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;" oninput="atualizarValPreview()">
+      </div>
+    </div>
+    <div class="valor-preview" id="mp-val-preview"></div>
+
+    <!-- Plantão Fixo -->
+    <div style="margin-top:10px;padding:10px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);" id="mp-fixo-wrap">
+      <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="togglePlantaoFixo()">
+        <div id="mp-fixo-toggle" style="width:32px;height:18px;border-radius:9px;background:var(--border2);position:relative;transition:background .2s;flex-shrink:0;">
+          <div id="mp-fixo-knob" style="width:14px;height:14px;border-radius:50%;background:#fff;position:absolute;top:2px;left:2px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>
+        </div>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text);">Plantão fixo</span>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-left:auto;">repetir todo ano</span>
+      </div>
+      <div id="mp-fixo-opcoes" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+        <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:7px;">Tipo de repetição</div>
+        <div style="display:flex;gap:4px;margin-bottom:10px;">
+          <button id="mp-fixo-tipo-semanal" onclick="setTipoFixo('semanal')" style="flex:1;font-family:var(--mono);font-size:9px;padding:7px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;">Toda semana</button>
+          <button id="mp-fixo-tipo-mensal" onclick="setTipoFixo('mensal')" style="flex:1;font-family:var(--mono);font-size:9px;padding:7px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer;">Padrão mensal</button>
+        </div>
+
+        <!-- Modo semanal -->
+        <div id="mp-fixo-semanal-opts">
+          <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:7px;">Repetir toda semana em</div>
+          <div id="mp-dias-semana" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;"></div>
+        </div>
+
+        <!-- Modo mensal -->
+        <div id="mp-fixo-mensal-opts" style="display:none;">
+          <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:7px;">Quais ocorrências do mês</div>
+          <div id="mp-ocorrencias" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;"></div>
+          <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:7px;">Dia da semana</div>
+          <div id="mp-dia-semana-mensal" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;"></div>
+        </div>
+
+        <div style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:7px;">Período de vigência</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+          <div class="modal-field" style="margin:0"><label style="font-size:9px;">De</label><input type="date" id="mp-fixo-ini" style="font-family:var(--mono);font-size:11px;"></div>
+          <div class="modal-field" style="margin:0"><label style="font-size:9px;">Até</label><input type="date" id="mp-fixo-fim" style="font-family:var(--mono);font-size:11px;"></div>
+        </div>
+        <div id="mp-fixo-preview" style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-top:6px;min-height:16px;"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="fecharModalPlantao()">Cancelar</button>
+      <button class="btn-primary" id="mp-btn-add" onclick="confirmarPlantao()">+ Adicionar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal perfil -->
+<div class="modal-overlay" id="modal-perfil">
+  <div class="modal">
+    <div class="modal-drag"></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <div id="mp-avatar-preview" style="width:52px;height:52px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:18px;font-weight:500;color:#fff;flex-shrink:0;">?</div>
+      <div>
+        <div class="modal-title" style="margin-bottom:2px">Meu perfil</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3)">Login via Google</div>
+      </div>
+    </div>
+    <div class="modal-field"><label>Nome completo</label><input type="text" id="pf-nome" placeholder="Dr. João Silva" oninput="atualizarAvatarPreview()"></div>
+    <div class="modal-field"><label>Especialidade</label><input type="text" id="pf-esp" placeholder="Cardiologia"></div>
+    <div class="modal-field"><label>E-mail</label><input type="email" id="pf-email" placeholder="joao@email.com" readonly style="opacity:.5;cursor:default;"></div>
+    <div id="pf-erro" style="font-family:var(--mono);font-size:10px;color:#c0392b;margin-top:-4px;margin-bottom:8px;display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="fecharModalPerfil()">Cancelar</button>
+      <button class="btn-primary" onclick="salvarPerfil()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <div class="sidebar" id="sidebar">
+    <div class="sb-head">
+      <div class="sb-head-row">
+        <div class="sb-logo">Shiftr</div>
+        <div style="display:flex;gap:5px;align-items:center">
+          <button class="icon-btn" onclick="toggleDark()" id="btn-dark">☀</button>
+          <div id="sb-avatar" class="perfil-avatar sem-perfil" onclick="abrirModalPerfil()" title="Perfil">&#128100;</div>
+        </div>
+      </div>
+      <div id="sb-perfil-info" style="display:none;margin-top:8px;display:none;align-items:center;gap:8px;padding:6px 0;border-top:.5px solid var(--border);cursor:pointer;" onclick="abrirModalPerfil()">
+        <div>
+          <div class="perfil-nome" id="sb-perfil-nome"></div>
+          <div class="perfil-esp" id="sb-perfil-esp"></div>
+        </div>
+      </div>
+      <div class="ano-nav">
+        <button class="icon-btn" onclick="navAno(-1)">&#8249;</button>
+        <span id="ano-display">2026</span>
+        <button class="icon-btn" onclick="navAno(1)">&#8250;</button>
+      </div>
+      <div class="page-nav" style="margin-top:10px;">
+        <button class="page-btn active" id="nav-cal" onclick="setPage('cal')">&#128197; Cal.</button>
+        <button class="page-btn" id="nav-dash" onclick="setPage('dash')">&#9632; Dashboard</button>
+      </div>
+    </div>
+
+    <!-- Hospitais -->
+    <div class="sb-sec">
+      <div class="sb-title">Hospitais</div>
+      <div class="hosp-list" id="hosp-list"></div>
+      <button class="btn-add-hosp" onclick="abrirModalHosp()">+ Adicionar hospital</button>
+    </div>
+
+    <!-- Resumo anual -->
+    <div class="sb-sec">
+      <div class="sb-title">Resumo anual <button class="sb-toggle" id="btn-resumo-body" onclick="toggleSec('resumo-body',this)">+</button></div>
+      <div class="sb-collapse" id="resumo-body" style="display:none">
+        <div class="metric-col" id="resumo-metrics"></div>
+      </div>
+    </div>
+
+    <!-- Soma por intervalo -->
+    <div class="sb-sec">
+      <div class="sb-title">Soma por intervalo</div>
+      <!-- inputs hidden que guardam o valor selecionado -->
+      <input type="hidden" id="dt-ini">
+      <input type="hidden" id="dt-fim">
+      <!-- mini calendários -->
+      <div class="mini-range-wrap">
+        <div class="mini-range-labels">
+          <div class="mini-range-lbl" id="lbl-ini">Início: —</div>
+          <div class="mini-range-lbl" id="lbl-fim">Fim: —</div>
+        </div>
+        <div class="mini-cal-nav">
+          <button class="icon-btn" onclick="miniNavMes(-1)">&#8249;</button>
+          <span id="mini-mes-label" style="font-family:var(--mono);font-size:11px;font-weight:500;"></span>
+          <button class="icon-btn" onclick="miniNavMes(1)">&#8250;</button>
+        </div>
+        <div class="mini-cal-dow">
+          <span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span><span>D</span>
+        </div>
+        <div class="mini-cal-grid" id="mini-cal-grid"></div>
+      </div>
+      <button class="btn-sm" onclick="somarIntervalo()" style="margin-top:8px">Calcular</button>
+      <button class="btn-sm" onclick="limparMiniCal()" style="margin-top:4px;color:var(--text3)">Limpar seleção</button>
+      <div class="sum-result" id="sum-result"></div>
+      <div class="sum-error" id="sum-error"></div>
+    </div>
+
+    <!-- Previsão -->
+    <div class="sb-sec">
+      <div class="sb-title">
+        Previsão de recebimentos
+        <button class="sb-toggle" id="btn-prev-body" onclick="toggleSec('prev-body',this)">+</button>
+      </div>
+      <div class="sb-collapse" id="prev-body" style="display:none">
+        <div class="prev-list" id="prev-list"></div>
+      </div>
+    </div>
+
+    <!-- Documentos e Certificados -->
+    <div class="sb-sec">
+      <div class="sb-title">
+        Documentos &amp; Certificados
+        <button class="sb-toggle" id="btn-docs-body" onclick="toggleSec('docs-body',this)">+</button>
+      </div>
+      <div class="sb-collapse" id="docs-body" style="display:none">
+        <div id="docs-list"></div>
+        <button class="btn-add-hosp" onclick="abrirModalDoc()" style="margin-top:6px">+ Adicionar documento</button>
+      </div>
+    </div>
+
+    <!-- Divisão de Descanso -->
+    <div class="sb-sec">
+      <div class="sb-title">
+        Divisão de Descanso
+        <button class="sb-toggle" id="btn-divisao-body" onclick="toggleSec('divisao-body',this)">+</button>
+      </div>
+      <div class="sb-collapse" id="divisao-body" style="display:none">
+        <div class="modal-field" style="margin-bottom:8px;">
+          <label>Hora inicial</label>
+          <input type="time" id="div-ini" value="23:00" style="font-family:var(--mono);font-size:13px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;width:100%;">
+        </div>
+        <div class="modal-field" style="margin-bottom:8px;">
+          <label>Hora final</label>
+          <input type="time" id="div-fim" value="05:00" style="font-family:var(--mono);font-size:13px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;width:100%;">
+        </div>
+        <div class="modal-field" style="margin-bottom:10px;">
+          <label>Número de pessoas</label>
+          <input type="number" id="div-pessoas" min="1" max="20" value="3" style="font-family:var(--mono);font-size:13px;padding:9px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);outline:none;width:100%;">
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <button onclick="dividirHorarios()" style="flex:1;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-weight:600;">Dividir</button>
+          <button onclick="limparDivisao()" style="flex:1;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--text2);">Apagar</button>
+        </div>
+        <div id="div-resultado" style="display:none;">
+          <div id="div-lista" style="font-family:var(--mono);font-size:11px;color:var(--text);line-height:1.9;margin-bottom:10px;"></div>
+          <button onclick="compartilharDivisao()" style="width:100%;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:10px;background:#25D366;color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.93.55 3.73 1.5 5.26L2 22l4.97-1.6a9.87 9.87 0 0 0 5.07 1.38c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zm0 17.94a8 8 0 0 1-4.27-1.23l-.3-.19-3.18 1.02 1.04-3.04-.2-.31a7.97 7.97 0 0 1-1.27-4.28c0-4.42 3.6-8.02 8.02-8.02s8.02 3.6 8.02 8.02-3.6 8.03-8.02 8.03zm4.4-6.02c-.24-.12-1.42-.7-1.64-.78-.22-.08-.38-.12-.54.12-.16.24-.62.78-.76.94-.14.16-.28.18-.52.06-.24-.12-1-.37-1.9-1.18-.7-.62-1.18-1.4-1.32-1.64-.14-.24-.01-.37.11-.49.12-.12.27-.31.4-.46.13-.16.18-.27.27-.45.08-.18.04-.34-.04-.46-.08-.12-.36-.86-.5-1.18-.13-.3-.27-.27-.37-.27h-.32c-.1 0-.27.04-.41.2-.14.16-.55.54-.55 1.3 0 .77.56 1.51.64 1.61.08.1 1.1 1.68 2.68 2.3 1.58.61 1.58.4 1.86.38.28-.02.9-.37 1.03-.72.13-.36.13-.66.09-.72-.04-.06-.14-.1-.3-.18z"/></svg>
+            Compartilhar via WhatsApp
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Instalar PWA -->
+    <div class="sb-sec">
+      <button id="btn-instalar-pwa" onclick="instalarPWA()" style="display:none;width:100%;align-items:center;justify-content:center;gap:8px;font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.07em;padding:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:var(--radius);cursor:pointer;box-shadow:0 4px 14px var(--accent-glow);">
+        ⬇ Instalar Shiftr no celular
+      </button>
+      <div id="pwa-installed-msg" style="display:none;font-family:var(--mono);font-size:9px;color:var(--green);text-align:center;padding:6px;">✓ App instalado</div>
+    </div>
+
+    <!-- Logout -->
+    <div class="sb-sec" style="margin-top:auto;">
+      <button class="btn-action danger" onclick="logout()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;">
+        <span>&#8594;</span> Sair da conta
+      </button>
+    </div>
+
+  </div>
+
+  <!-- MAIN -->
+  <div class="main-content">
+    <!-- Topbar desktop -->
+    <div class="main-topbar">
+      <div class="year-label" id="year-label">— 2026</div>
+      <div class="page-nav" style="width:auto;min-width:200px;">
+        <button class="page-btn active" id="nav-cal" onclick="setPage('cal')">&#128197; Calendário</button>
+        <button class="page-btn" id="nav-dash" onclick="setPage('dash')">&#9632; Dashboard</button>
+      </div>
+    </div>
+    <!-- Página: Calendário -->
+    <div class="page active" id="page-cal">
+      <div class="months-grid" id="months-grid"></div>
+    </div>
+    <!-- Página: Dashboard -->
+    <div class="page" id="page-dash" style="padding:20px;">
+      <div class="year-label" id="dash-label" style="margin-bottom:16px;">Dashboard — 2026</div>
+      <div id="dash-content"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// ESTADO
+// ═══════════════════════════════════════════════
+const DK = 'shiftr_tema';
+let plantoes   = [];
+let hospitais  = [];
+let regras     = {};  // regras por hospId, unificadas
+
+// ═══════════════════════════════════════════════
+// FIREBASE AUTH & FIRESTORE
+// ═══════════════════════════════════════════════
+let _currentUser = null;
+let _saveTimer   = null;
+
+function showSyncBar(msg, autoHide=true){
+  const bar=document.getElementById('sync-bar');
+  const txt=document.getElementById('sync-msg');
+  if(txt) txt.textContent=msg||'Sincronizando...';
+  if(bar) bar.classList.add('show');
+  if(autoHide) setTimeout(()=>bar&&bar.classList.remove('show'), 2200);
+}
+
+function loginGoogle(){
+  if(!window._fbReady){ alert('Firebase ainda carregando, aguarde.'); return; }
+  const {auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect} = window._fb;
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({prompt:'select_account'});
+  document.getElementById('login-loading').classList.add('show');
+  document.getElementById('login-error').style.display='none';
+  signInWithPopup(auth, provider).catch(err=>{
+    if(err.code==='auth/popup-blocked'||err.code==='auth/cancelled-popup-request'){
+      signInWithRedirect(auth, provider);
+    } else {
+      document.getElementById('login-loading').classList.remove('show');
+      const el=document.getElementById('login-error');
+      el.textContent='Erro: '+err.message;
+      el.style.display='block';
+    }
+  });
+}
+
+function logout(){
+  if(!window._fbReady) return;
+  if(!confirm('Deseja sair da sua conta?')) return;
+  window._fb.signOut(window._fb.auth);
+}
+
+let _unsubSnapshot = null; // listener em tempo real
+let _ignorarProximoSnapshot = false; // evita loop ao salvar
+let _docsJaCarregados = false; // evita reler a subcoleção de documentos a cada snapshot
+
+async function carregarDoFirestore(uid){
+  const {db, doc, onSnapshot} = window._fb;
+  showSyncBar('Carregando seus dados...', false);
+
+  // Cancela listener anterior se existir
+  if(_unsubSnapshot){ _unsubSnapshot(); _unsubSnapshot=null; }
+  _docsJaCarregados = false; // novo login/usuário: precisa carregar os documentos de novo
+
+  // onSnapshot — escuta mudanças em tempo real no documento do usuário
+  _unsubSnapshot = onSnapshot(doc(db,'usuarios',uid), (snap) => {
+
+    // Ignora o echo imediato após nosso próprio save
+    if(_ignorarProximoSnapshot){ _ignorarProximoSnapshot=false; return; }
+
+    if(snap.exists()){
+      const d = snap.data();
+      if(Array.isArray(d.plantoes))   plantoes   = d.plantoes;
+      if(Array.isArray(d.hospitais))  hospitais  = d.hospitais;
+      if(Array.isArray(d.documentos)) documentos = d.documentos;
+      if(d.regras && typeof d.regras==='object') { regras=d.regras; regrasHosp=regras; }
+      if(d.perfil && typeof d.perfil==='object') perfil = {...perfil, ...d.perfil};
+      if(d.metas && typeof d.metas==='object')   metas  = d.metas;
+      if(d.tema) localStorage.setItem(DK, d.tema);
+    }
+    showSyncBar('Sincronizado ✓');
+    loadTema();
+    atualizarUIperfil();
+    render();
+    if(!_docsJaCarregados){
+      _docsJaCarregados = true;
+      carregarDocsFirestore();
+    }
+  }, (err)=>{
+    console.warn('Erro no listener Firestore:',err);
+    showSyncBar('Erro de conexão ⚠');
+  });
+}
+
+async function _salvarFirestore(uid){
+  if(!uid||!window._fbReady) return;
+  const {db, doc, setDoc} = window._fb;
+  showSyncBar('Salvando...', false);
+  _ignorarProximoSnapshot = true;
+  try{
+    // Dados principais — documentos ficam na subcoleção separada
+    await setDoc(doc(db,'usuarios',uid),{
+      plantoes, hospitais, regras, perfil, metas,
+      tema: localStorage.getItem(DK)||'dark',
+      updatedAt: new Date().toISOString()
+    });
+    showSyncBar('Salvo ✓');
+  }catch(e){
+    _ignorarProximoSnapshot = false;
+    showSyncBar('Erro ao salvar ⚠');
+    console.error(e);
+  }
+}
+
+// Salvar documento individual na subcoleção /usuarios/{uid}/documentos/{docId}
+async function salvarDocFirestore(docItem){
+  const uid = _currentUser?.uid;
+  if(!uid||!window._fbReady) return;
+  const {db, doc, setDoc} = window._fb;
+  try{
+    await setDoc(doc(db,'usuarios',uid,'documentos',docItem.id), docItem);
+    showSyncBar('Documento salvo ✓');
+  }catch(e){ showSyncBar('Erro ao salvar documento ⚠'); console.error(e); }
+}
+
+// Excluir documento da subcoleção
+async function excluirDocFirestore(docId){
+  const uid = _currentUser?.uid;
+  if(!uid||!window._fbReady) return;
+  const {db, doc, deleteDoc} = window._fb;
+  try{
+    await deleteDoc(doc(db,'usuarios',uid,'documentos',docId));
+  }catch(e){ console.error('Erro ao excluir doc:', e); }
+}
+
+// Carregar documentos da subcoleção
+async function carregarDocsFirestore(){
+  const uid = _currentUser?.uid;
+  if(!uid||!window._fbReady) return;
+  const {db, collection, getDocs} = window._fb;
+  try{
+    const snap = await getDocs(collection(db,'usuarios',uid,'documentos'));
+    documentos = snap.docs.map(d=>d.data());
+    renderDocs();
+    setTimeout(verificarAlertas, 300);
+  }catch(e){ console.error('Erro ao carregar docs:', e); }
+}
+
+function saveFS(){
+  if(!_currentUser) return;
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(()=> _salvarFirestore(_currentUser.uid), 900);
+}
+
+// Funções unificadas de persistência
+function save()       { saveFS(); }
+function saveRegras() { saveFS(); }
+function savePerfil() { saveFS(); }
+function load()       { plantoes=[]; hospitais=[]; }
+function carregarRegras() { regras={}; }
+
+function initAuth(){
+  if(!window._fbReady){ window.addEventListener('fb-ready', initAuth, {once:true}); return; }
+  const {auth, onAuthStateChanged, getRedirectResult} = window._fb;
+  getRedirectResult(auth).catch(()=>{});
+  onAuthStateChanged(auth, async user=>{
+    if(user){
+      _currentUser = user;
+      document.getElementById('login-screen').classList.remove('visible');
+      // Avatar Google
+      if(user.photoURL){
+        ['sb-avatar','tb-avatar'].forEach(id=>{
+          const el=document.getElementById(id);
+          if(el){ el.style.background=`url(${user.photoURL}) center/cover no-repeat`; el.textContent=''; el.classList.remove('sem-perfil'); }
+        });
+      }
+      if(!perfil.nome && user.displayName){ perfil.nome=user.displayName; perfil.email=user.email||''; }
+      await carregarDoFirestore(user.uid);
+    } else {
+      _currentUser=null;
+      plantoes=[]; hospitais=[]; regras={}; perfil={nome:'',esp:'',email:'',senha:''};
+      document.getElementById('login-screen').classList.add('visible');
+      document.getElementById('login-loading').classList.remove('show');
+    }
+  });
+}
+let anoAtual   = new Date().getFullYear();
+let turnoSel   = 'Diurno';
+let hospSel    = null; // id do hospital selecionado na sidebar
+let editHospId = null;
+// modal plantao
+let modalData  = null; // dateStr sendo editado
+let modalTurno = 'Diurno';
+let modalHospId= null;
+let modalExistId = null; // id do plantao existente (modo edição)
+
+const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+// ═══════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function fmtD(d){ return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
+function parseD(s){ const p=s.split('/'); return new Date(+p[2],+p[1]-1,+p[0]); }
+function isWE(d){ return d.getDay()===0||d.getDay()===6; }
+function brl(v){ return 'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function horasEntreHorarios(ini,fim){
+  // ini e fim são strings "HH:MM"
+  const [hi,mi]=ini.split(':').map(Number);
+  const [hf,mf]=fim.split(':').map(Number);
+  let mins=(hf*60+mf)-(hi*60+mi);
+  if(mins<=0) mins+=24*60; // noturno cruza meia noite
+  return mins/60;
+}
+function calcValor(hosp, turno, hIni, hFim, dateStr){
+  if(!hosp) return 0;
+  // determinar se é FDS
+  const d = dateStr ? parseD(dateStr) : new Date();
+  const fds = isWE(d);
+  // determinar tipo base (Diurno ou Noturno) para Custom
+  let tipoBase = turno;
+  if(turno === 'Custom'){
+    // se começa >= 19 ou < 7 é noturno
+    const hIniN = parseInt((hIni||'07:00').split(':')[0]);
+    tipoBase = (hIniN >= 19 || hIniN < 7) ? 'Noturno' : 'Diurno';
+  }
+  const isDiurno = tipoBase !== 'Noturno';
+  // valor base 12h conforme combinação
+  const val12 = isDiurno
+    ? (fds ? (hosp.df||hosp.ds||0) : (hosp.ds||0))
+    : (fds ? (hosp.nf||hosp.ns||0) : (hosp.ns||0));
+  // horas efetivas
+  let h = 12;
+  if(turno === 'Custom' && hIni && hFim) h = horasEntreHorarios(hIni, hFim);
+  if(Math.abs(h-12) < 0.01) return val12;
+  // valor/hora
+  const valH = isDiurno ? (hosp.hd || val12/12) : (hosp.hn || val12/12);
+  return h * valH;
+}
+function getHosp(id){ return hospitais.find(h=>h.id===id)||null; }
+
+// ═══════════════════════════════════════════════
+// DARK MODE
+// ═══════════════════════════════════════════════
+function toggleDark(){
+  const isLight=document.body.classList.toggle('light');
+  const ic=isLight?'☽':'☀';
+  ['btn-dark','btn-dark-m'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=ic;});
+  try{localStorage.setItem(DK,isLight?'light':'dark');}catch(e){}
+}
+function loadTema(){
+  try{
+    const saved=localStorage.getItem(DK);
+    if(saved==='light'){
+      document.body.classList.add('light');
+      ['btn-dark','btn-dark-m'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='☽';});
+    }
+    // default é dark, sem classe necessária
+  }catch(e){}
+}
+
+// ═══════════════════════════════════════════════
+// MOBILE MENU
+// ═══════════════════════════════════════════════
+function abrirMenu(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('sb-overlay').classList.add('open'); document.body.style.overflow='hidden'; }
+function fecharMenu(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('sb-overlay').classList.remove('open'); document.body.style.overflow=''; }
+
+// ═══════════════════════════════════════════════
+// COLLAPSE
+// ═══════════════════════════════════════════════
+function toggleSec(id,btn){
+  const el=document.getElementById(id);
+  const h=el.style.display==='none';
+  el.style.display=h?'':'none';
+  btn.textContent=h?'−':'+';
+}
+
+// ═══════════════════════════════════════════════
+// TURNO SIDEBAR
+// ═══════════════════════════════════════════════
+function setTurno(t){
+  turnoSel=t;
+  ['Diurno','Noturno','Custom'].forEach(x=>{
+    document.getElementById('btn-'+x.toLowerCase()).className='turno-btn'+(t===x?' active':'');
+  });
+  document.getElementById('tc-sidebar').className='turno-custom'+(t==='Custom'?' show':'');
+}
+
+// ═══════════════════════════════════════════════
+// MODAL HOSPITAL
+// ═══════════════════════════════════════════════
+const CORES_HOSP = [
+  {hex:'#e74c3c', nome:'Vermelho'},
+  {hex:'#e67e22', nome:'Laranja'},
+  {hex:'#f1c40f', nome:'Amarelo'},
+  {hex:'#27ae60', nome:'Verde'},
+  {hex:'#1abc9c', nome:'Turquesa'},
+  {hex:'#2980b9', nome:'Azul'},
+  {hex:'#8e44ad', nome:'Roxo'},
+  {hex:'#e91e8c', nome:'Rosa'},
+  {hex:'#00bcd4', nome:'Ciano'},
+  {hex:'#607d8b', nome:'Cinza azulado'},
+  {hex:'#795548', nome:'Marrom'},
+  {hex:'#ff5722', nome:'Laranja escuro'},
+  {hex:'#009688', nome:'Verde petróleo'},
+  {hex:'#673ab7', nome:'Violeta'},
+  {hex:'#f06292', nome:'Rosa claro'},
+  {hex:'#4caf50', nome:'Verde médio'},
+  {hex:'#ffc107', nome:'Âmbar'},
+  {hex:'#3f51b5', nome:'Índigo'},
+  {hex:'#ff9800', nome:'Âmbar escuro'},
+  {hex:'#9c27b0', nome:'Púrpura'},
+];
+
+function hexComAlpha(hex, alpha){
+  const r=parseInt(hex.slice(1,3),16);
+  const g=parseInt(hex.slice(3,5),16);
+  const b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function popularSelectCores(corAtual){
+  const sel=document.getElementById('mh-cor');
+  const usadas=hospitais.filter(h=>h.id!==editHospId).map(h=>h.cor.toLowerCase());
+  sel.innerHTML='';
+  CORES_HOSP.forEach(c=>{
+    const usada=usadas.includes(c.hex.toLowerCase());
+    const opt=document.createElement('option');
+    opt.value=c.hex;
+    opt.textContent=(usada?'✗ ':'● ')+c.nome;
+    opt.disabled=usada;
+    opt.style.color=usada?'var(--text3)':c.hex;
+    if(c.hex.toLowerCase()===(corAtual||'').toLowerCase()) opt.selected=true;
+    sel.appendChild(opt);
+  });
+  // se cor atual não está na lista, selecionar primeira disponível
+  if(!sel.value || usadas.includes(sel.value.toLowerCase())){
+    const primeira=CORES_HOSP.find(c=>!usadas.includes(c.hex.toLowerCase()));
+    if(primeira) sel.value=primeira.hex;
+  }
+}
+
+function toggleRegimeIR(){
+  const v=document.getElementById('mh-regime').value;
+  document.getElementById('mh-ir-cnpj').style.display=v==='cnpj'?'block':'none';
+  document.getElementById('mh-ir-pf').style.display=v==='pf'?'block':'none';
+}
+
+// Tabela progressiva IR 2026 — carnê-leão / autônomo
+// Fonte: Lei nº 15.270/2025 + MP 1294/2025 (vigência maio/2025)
+function calcIRPF(base){
+  // Tabela progressiva mensal 2026
+  let ir=0;
+  if(base<=2428.80)      ir=0;
+  else if(base<=2826.65) ir=base*0.075 - 182.16;
+  else if(base<=3751.05) ir=base*0.15  - 394.16;
+  else if(base<=4664.68) ir=base*0.225 - 675.49;
+  else                   ir=base*0.275 - 908.74;
+
+  // Redutor 2026 (Lei 15.270/2025): isenta até R$5.000, redução gradual até R$7.350
+  if(base<=5000)         ir=0;
+  else if(base<=7350){
+    const redutor=978.62-(0.133145*base);
+    ir=Math.max(0, ir-redutor);
+  }
+  return Math.max(0, ir);
+}
+
+function calcIR(totalLiquido, regime, aliq){
+  if(!totalLiquido || totalLiquido<=0) return 0;
+  if(regime==='empresa') return 0; // empresa gerencia
+  if(regime==='cnpj') return totalLiquido * ((aliq||0)/100);
+  if(regime==='pf') return calcIRPF(totalLiquido);
+  return 0;
+}
+
+function labelRegime(regime){
+  if(regime==='empresa') return '🏢 Empresa';
+  if(regime==='cnpj')    return '🏛 CNPJ próprio';
+  if(regime==='pf')      return '👤 Pessoa física';
+  return '';
+}
+
+function atualizarValoresHora(){
+  const ds = parseFloat(document.getElementById('mh-ds').value)||0;
+  const ns = parseFloat(document.getElementById('mh-ns').value)||0;
+  const hd = document.getElementById('mh-hd');
+  const hn = document.getElementById('mh-hn');
+  const baseD = ds > 0 ? ds : 0;
+  const baseN = ns > 0 ? ns : 0;
+  hd.value = baseD > 0 ? (baseD/12).toFixed(2) : '';
+  hn.value = baseN > 0 ? (baseN/12).toFixed(2) : '';
+}
+function validarCorHosp(){
+  const sel=document.getElementById('mh-cor');
+  const aviso=document.getElementById('mh-cor-aviso');
+  const usadas=hospitais.filter(h=>h.id!==editHospId).map(h=>h.cor.toLowerCase());
+  aviso.style.display=usadas.includes(sel.value.toLowerCase())?'block':'none';
+}
+
+function abrirModalHosp(id=null){
+  editHospId=id;
+  const h=id?getHosp(id):null;
+  document.getElementById('mh-title').textContent=h?'Editar hospital':'Novo hospital';
+  document.getElementById('mh-nome').value=h?h.nome:'';
+  popularSelectCores(h?h.cor:null);
+  document.getElementById('mh-cor-aviso').style.display='none';
+  document.getElementById('mh-ds').value=h?h.ds:'';
+  document.getElementById('mh-df').value=h?h.df:'';
+  document.getElementById('mh-ns').value=h?h.ns:'';
+  document.getElementById('mh-nf').value=h?h.nf:'';
+  document.getElementById('mh-regime').value=h?.regime||'empresa';
+  document.getElementById('mh-aliq').value=h?.aliq||'';
+  document.getElementById('mh-del').style.display=h?'block':'none';
+  document.getElementById('modal-hosp').classList.add('open');
+  atualizarValoresHora();
+  toggleRegimeIR();
+}
+function fecharModalHosp(){ document.getElementById('modal-hosp').classList.remove('open'); editHospId=null; }
+function salvarHosp(){
+  const nome=document.getElementById('mh-nome').value.trim();
+  if(!nome){alert('Informe o nome do hospital.');return;}
+  const cor=document.getElementById('mh-cor').value;
+  const corDuplicada=hospitais.some(h=>h.id!==editHospId&&h.cor.toLowerCase()===cor.toLowerCase());
+  if(corDuplicada){alert('Essa cor já está sendo usada por outro hospital.');return;}
+  const ds=parseFloat(document.getElementById('mh-ds').value)||0;
+  const df=parseFloat(document.getElementById('mh-df').value)||ds;
+  const ns=parseFloat(document.getElementById('mh-ns').value)||0;
+  const nf=parseFloat(document.getElementById('mh-nf').value)||ns;
+  // Sempre calcula hd e hn automaticamente — ignora o campo readonly
+  const hd = ds > 0 ? ds/12 : 0;
+  const hn = ns > 0 ? ns/12 : 0;
+  const regime=document.getElementById('mh-regime').value;
+  const aliq=parseFloat(document.getElementById('mh-aliq').value)||0;
+  const dados={nome,cor,ds,df,ns,nf,hd,hn,regime,aliq};
+  if(editHospId){
+    const h=getHosp(editHospId); if(h) Object.assign(h,dados);
+  } else {
+    hospitais.push({id:uid(),...dados});
+  }
+  save(); fecharModalHosp(); render();
+}
+function deletarHosp(){
+  if(!confirm('Remover hospital e todos os plantões vinculados?')) return;
+  plantoes=plantoes.filter(p=>p.hospId!==editHospId);
+  hospitais=hospitais.filter(h=>h.id!==editHospId);
+  if(hospSel===editHospId) hospSel=null;
+  save(); fecharModalHosp(); render();
+}
+
+// ═══════════════════════════════════════════════
+// MODAL PLANTÃO
+// ═══════════════════════════════════════════════
+function abrirModalPlantao(dateStr){
+  modalData=dateStr;
+  modalExistId=null;
+
+  // Resetar estado do plantão fixo
+  fixoAtivo = false;
+  fixoTipo = 'semanal';
+  fixoDiasSel = [parseD(dateStr).getDay()]; // pré-seleciona o dia clicado
+  fixoOcorrenciasSel = [];
+  fixoDiaSemanaMensal = null;
+  const toggle = document.getElementById('mp-fixo-toggle');
+  const knob   = document.getElementById('mp-fixo-knob');
+  if(toggle){ toggle.style.background='var(--border2)'; knob.style.left='2px'; }
+  const opcoes = document.getElementById('mp-fixo-opcoes');
+  if(opcoes) opcoes.style.display='none';
+  const btnAdd = document.getElementById('mp-btn-add');
+  if(btnAdd) btnAdd.textContent='+ Adicionar';
+  // reset visual do toggle de tipo
+  const btnS=document.getElementById('mp-fixo-tipo-semanal');
+  const btnM=document.getElementById('mp-fixo-tipo-mensal');
+  const optsS=document.getElementById('mp-fixo-semanal-opts');
+  const optsM=document.getElementById('mp-fixo-mensal-opts');
+  if(btnS){ btnS.style.background='var(--accent)'; btnS.style.color='#fff'; btnS.style.borderColor='var(--accent)'; }
+  if(btnM){ btnM.style.background='var(--surface2)'; btnM.style.color='var(--text2)'; btnM.style.borderColor='var(--border)'; }
+  if(optsS) optsS.style.display='block';
+  if(optsM) optsM.style.display='none';
+  // definir período padrão = ano atual
+  const anoStr = String(anoAtual);
+  const mp_ini = document.getElementById('mp-fixo-ini');
+  const mp_fim = document.getElementById('mp-fixo-fim');
+  if(mp_ini) mp_ini.value = anoStr+'-01-01';
+  if(mp_fim) mp_fim.value = anoStr+'-12-31';
+
+  document.getElementById('mp-title').textContent=fmtD(parseD(dateStr));
+
+  // Sempre modo adição — usa turno e hospital selecionados na sidebar
+  modalHospId=hospSel||(hospitais[0]?.id||null);
+  modalTurno=turnoSel;
+  if(turnoSel==='Custom'){
+    document.getElementById('tc-ini').value=document.getElementById('tc-s-ini').value;
+    document.getElementById('tc-fim').value=document.getElementById('tc-s-fim').value;
+  } else {
+    document.getElementById('tc-ini').value=turnoSel==='Noturno'?'19:00':'07:00';
+    document.getElementById('tc-fim').value=turnoSel==='Noturno'?'07:00':'19:00';
+  }
+
+  // Renderizar lista de plantões existentes neste dia
+  renderExistentesModal(dateStr);
+  renderPickerHosp();
+  setTurnoModal(modalTurno);
+  atualizarValPreview();
+  renderDiasSemanaFixo(parseD(dateStr).getDay());
+  document.getElementById('modal-plantao').classList.add('open');
+}
+
+function renderExistentesModal(dateStr){
+  const existentes=plantoes.filter(p=>p.data===dateStr);
+  const wrap=document.getElementById('mp-existentes-wrap');
+  const lista=document.getElementById('mp-existentes');
+  if(!existentes.length){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  lista.innerHTML=existentes.map(p=>{
+    const h=getHosp(p.hospId);
+    const ic=p.turno==='Noturno'?'☽':p.turno==='Diurno'?'☀':'⏱';
+    const cor=h?h.cor:'#999';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--surface2);margin-bottom:4px;">
+      <div style="width:8px;height:8px;border-radius:50%;background:${cor};flex-shrink:0"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:500">${ic} ${h?h.nome:'?'}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3)">${p.turno==='Custom'?(p.hIni+'–'+p.hFim):p.turno} · ${brl(p.valor)}</div>
+      </div>
+      <button onclick="removerPlantaoId('${p.id}');renderExistentesModal('${dateStr}')" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:15px;line-height:1;padding:0 2px;transition:color .12s;" onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='var(--text3)'">&#215;</button>
+    </div>`;
+  }).join('');
+}
+function fecharModalPlantao(){ document.getElementById('modal-plantao').classList.remove('open'); modalData=null; modalExistId=null; }
+
+function renderPickerHosp(){
+  const picker=document.getElementById('mp-hosp-picker');
+  if(!hospitais.length){
+    picker.innerHTML='<div class="empty-state">Nenhum hospital cadastrado</div>';
+    return;
+  }
+  picker.innerHTML=hospitais.map(h=>`
+    <div class="hosp-pick-item${modalHospId===h.id?' selected':''}" style="${modalHospId===h.id?'border-color:'+h.cor:''}" onclick="selecionarHospModal('${h.id}')">
+      <div class="hosp-pick-dot" style="background:${h.cor}"></div>
+      <div class="hosp-pick-info">
+        <div class="hosp-pick-name">${h.nome}</div>
+        <div class="hosp-pick-val">☀sem: ${brl(h.ds)} · fds: ${brl(h.df)}<br>☽sem: ${brl(h.ns)} · fds: ${brl(h.nf)}</div>
+      </div>
+    </div>`).join('');
+}
+function selecionarHospModal(id){ modalHospId=id; renderPickerHosp(); atualizarValPreview(); }
+
+function setTurnoModal(t){
+  modalTurno=t;
+  ['Diurno','Noturno','Custom'].forEach(x=>{
+    document.getElementById('tp-'+x.toLowerCase()).className='turno-btn'+(t===x?' active':'');
+  });
+  document.getElementById('tc-custom').className='turno-custom'+(t==='Custom'?' show':'');
+  document.getElementById('tc-valor-custom').className='turno-custom'+(t==='Custom'?' show':'');
+  if(t==='Custom') document.getElementById('tc-valor').value='';
+  atualizarValPreview();
+}
+function atualizarValPreview(){
+  const hosp=getHosp(modalHospId);
+  if(!hosp){ document.getElementById('mp-val-preview').textContent=''; return; }
+  const ini=document.getElementById('tc-ini').value;
+  const fim=document.getElementById('tc-fim').value;
+  const h=modalTurno==='Custom'?horasEntreHorarios(ini,fim):12;
+  const fds=modalData?isWE(parseD(modalData)):false;
+  const label=fds?'fim de semana':'dia de semana';
+  // se Custom e valor manual preenchido, usa ele; senão calcula
+  const valorManual=modalTurno==='Custom'?parseFloat(document.getElementById('tc-valor').value)||0:0;
+  const v=valorManual>0?valorManual:calcValor(hosp,modalTurno,ini,fim,modalData);
+  document.getElementById('mp-val-preview').textContent=brl(v)+' · '+h.toFixed(1)+'h · '+label;
+}
+document.getElementById('tc-ini').addEventListener('change',atualizarValPreview);
+document.getElementById('tc-fim').addEventListener('change',atualizarValPreview);
+document.addEventListener('DOMContentLoaded', function(){
+  const fi = document.getElementById('mp-fixo-ini');
+  const ff = document.getElementById('mp-fixo-fim');
+  if(fi) fi.addEventListener('change', atualizarPreviewFixo);
+  if(ff) ff.addEventListener('change', atualizarPreviewFixo);
+});
+
+// Converte HH:MM em minutos desde meia-noite
+function toMins(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
+
+// Retorna array de intervalos [iniMins, fimMins] — pode cruzar meia-noite (fimMins > 1440)
+function intervaloPlantao(turno, hIni, hFim){
+  if(turno==='Diurno') return [[7*60, 19*60]];
+  if(turno==='Noturno') return [[19*60, 7*60+1440]]; // cruza meia-noite
+  const ini=toMins(hIni), fim=toMins(hFim);
+  return fim>ini ? [[ini,fim]] : [[ini, fim+1440]];
+}
+
+function intervalosColidem(a, b){
+  // a e b = [iniMins, fimMins] — fim pode ser > 1440 (cruza meia-noite)
+  // verifica sobreposição simples
+  return a[0] < b[1] && b[0] < a[1];
+}
+
+function temConflito(dateStr, turno, hIni, hFim, hospId){
+  const existentes = plantoes.filter(p => p.data === dateStr);
+  if(!existentes.length) return null;
+  const novoIntervalos = intervaloPlantao(turno, hIni, hFim);
+  for(const p of existentes){
+    const pIntervalos = intervaloPlantao(p.turno, p.hIni||'07:00', p.hFim||'19:00');
+    for(const ni of novoIntervalos){
+      for(const pi of pIntervalos){
+        if(intervalosColidem(ni, pi)){
+          const h = getHosp(p.hospId);
+          return `Conflito com plantão existente (${p.turno === 'Custom' ? p.hIni+'–'+p.hFim : p.turno}${h?' · '+h.nome:''})`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function confirmarPlantao(){
+  if(!modalHospId||!modalData){alert('Selecione um hospital.');return;}
+  const hosp=getHosp(modalHospId);
+  const ini=document.getElementById('tc-ini').value;
+  const fim=document.getElementById('tc-fim').value;
+
+  if(fixoAtivo){
+    // Modo plantão fixo — gerar em múltiplas datas
+    if(!fixoDiasSel.length){ alert('Selecione pelo menos um dia da semana.'); return; }
+    const datas = gerarDatasFixo();
+    if(!datas.length){ alert('Nenhuma data gerada. Verifique o período e os dias selecionados.'); return; }
+    const h = modalTurno==='Custom' ? horasEntreHorarios(ini,fim) : 12;
+    const valorManual = modalTurno==='Custom' ? parseFloat(document.getElementById('tc-valor').value)||0 : 0;
+    let criados = 0, conflitos = 0;
+    datas.forEach(ds => {
+      const conflito = temConflito(ds, modalTurno, ini, fim, modalHospId);
+      if(conflito){ conflitos++; return; }
+      const v = valorManual > 0 ? valorManual : calcValor(hosp, modalTurno, ini, fim, ds);
+      plantoes.push({id:uid(), data:ds, hospId:modalHospId, turno:modalTurno, hIni:ini, hFim:fim, valor:v, horas:h, fds:isWE(parseD(ds)), fixo:true});
+      criados++;
+    });
+    save(); fecharModalPlantao(); render();
+    if(conflitos > 0){
+      alert(`✅ ${criados} plantão(ões) fixo(s) criado(s).\n⚠️ ${conflitos} data(s) ignorada(s) por conflito de horário.`);
+    }
+    return;
+  }
+
+  // Modo plantão único (comportamento original)
+  const conflito=temConflito(modalData, modalTurno, ini, fim, modalHospId);
+  if(conflito){
+    alert(conflito);
+    return;
+  }
+  const h=modalTurno==='Custom'?horasEntreHorarios(ini,fim):12;
+  const valorManual=modalTurno==='Custom'?parseFloat(document.getElementById('tc-valor').value)||0:0;
+  const v=valorManual>0?valorManual:calcValor(hosp,modalTurno,ini,fim,modalData);
+  plantoes.push({id:uid(),data:modalData,hospId:modalHospId,turno:modalTurno,hIni:ini,hFim:fim,valor:v,horas:h,fds:isWE(parseD(modalData))});
+  save(); fecharModalPlantao(); render();
+}
+
+// ═══════════════════════════════════════════════
+// PLANTÃO FIXO
+// ═══════════════════════════════════════════════
+const DIAS_SEMANA_LABELS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const OCORRENCIAS_LABELS = ['1ª','2ª','3ª','4ª','Última'];
+let fixoAtivo = false;
+let fixoTipo = 'semanal'; // 'semanal' | 'mensal'
+let fixoDiasSel = [];        // array de 0–6 (0=Dom) — modo semanal
+let fixoOcorrenciasSel = []; // array de 0–4 (0=1ª,...,4=última) — modo mensal
+let fixoDiaSemanaMensal = null; // 0–6 — qual dia da semana no modo mensal
+
+function togglePlantaoFixo(){
+  fixoAtivo = !fixoAtivo;
+  const toggle = document.getElementById('mp-fixo-toggle');
+  const knob   = document.getElementById('mp-fixo-knob');
+  const opcoes = document.getElementById('mp-fixo-opcoes');
+  const btnAdd = document.getElementById('mp-btn-add');
+  toggle.style.background = fixoAtivo ? 'var(--accent)' : 'var(--border2)';
+  knob.style.left = fixoAtivo ? '16px' : '2px';
+  opcoes.style.display = fixoAtivo ? 'block' : 'none';
+  btnAdd.textContent = fixoAtivo ? '+ Adicionar fixo' : '+ Adicionar';
+  if(fixoAtivo){
+    renderDiasSemanaFixo();
+    renderOcorrenciasMensal();
+    renderDiaSemanaMensal();
+    atualizarPreviewFixo();
+  }
+}
+
+function setTipoFixo(tipo){
+  fixoTipo=tipo;
+  const btnS=document.getElementById('mp-fixo-tipo-semanal');
+  const btnM=document.getElementById('mp-fixo-tipo-mensal');
+  const optsS=document.getElementById('mp-fixo-semanal-opts');
+  const optsM=document.getElementById('mp-fixo-mensal-opts');
+  if(tipo==='semanal'){
+    btnS.style.background='var(--accent)'; btnS.style.color='#fff'; btnS.style.borderColor='var(--accent)';
+    btnM.style.background='var(--surface2)'; btnM.style.color='var(--text2)'; btnM.style.borderColor='var(--border)';
+    optsS.style.display='block'; optsM.style.display='none';
+  } else {
+    btnM.style.background='var(--accent)'; btnM.style.color='#fff'; btnM.style.borderColor='var(--accent)';
+    btnS.style.background='var(--surface2)'; btnS.style.color='var(--text2)'; btnS.style.borderColor='var(--border)';
+    optsM.style.display='block'; optsS.style.display='none';
+  }
+  atualizarPreviewFixo();
+}
+
+function renderDiasSemanaFixo(){
+  const wrap = document.getElementById('mp-dias-semana');
+  if(!wrap) return;
+  wrap.innerHTML = DIAS_SEMANA_LABELS.map((label, i) => {
+    const sel = fixoDiasSel.includes(i);
+    return `<div onclick="toggleDiaSemanaFixo(${i})" id="fixo-dia-${i}" style="
+      font-family:var(--mono);font-size:11px;padding:5px 9px;border-radius:6px;cursor:pointer;
+      border:1px solid ${sel ? 'var(--accent)' : 'var(--border)'};
+      background:${sel ? 'var(--accent)' : 'var(--surface)'};
+      color:${sel ? '#fff' : 'var(--text2)'};
+      transition:all .15s;user-select:none;
+    ">${label}</div>`;
+  }).join('');
+}
+
+function renderOcorrenciasMensal(){
+  const wrap=document.getElementById('mp-ocorrencias');
+  if(!wrap) return;
+  wrap.innerHTML=OCORRENCIAS_LABELS.map((label,i)=>{
+    const sel=fixoOcorrenciasSel.includes(i);
+    return `<div onclick="toggleOcorrenciaMensal(${i})" style="
+      font-family:var(--mono);font-size:11px;padding:5px 9px;border-radius:6px;cursor:pointer;
+      border:1px solid ${sel?'var(--accent)':'var(--border)'};
+      background:${sel?'var(--accent)':'var(--surface)'};
+      color:${sel?'#fff':'var(--text2)'};
+      transition:all .15s;user-select:none;
+    ">${label}</div>`;
+  }).join('');
+}
+
+function renderDiaSemanaMensal(){
+  const wrap=document.getElementById('mp-dia-semana-mensal');
+  if(!wrap) return;
+  wrap.innerHTML=DIAS_SEMANA_LABELS.map((label,i)=>{
+    const sel=fixoDiaSemanaMensal===i;
+    return `<div onclick="setDiaSemanaMensal(${i})" style="
+      font-family:var(--mono);font-size:11px;padding:5px 9px;border-radius:6px;cursor:pointer;
+      border:1px solid ${sel?'var(--accent)':'var(--border)'};
+      background:${sel?'var(--accent)':'var(--surface)'};
+      color:${sel?'#fff':'var(--text2)'};
+      transition:all .15s;user-select:none;
+    ">${label}</div>`;
+  }).join('');
+}
+
+function toggleDiaSemanaFixo(d){
+  if(fixoDiasSel.includes(d)) fixoDiasSel = fixoDiasSel.filter(x => x !== d);
+  else fixoDiasSel.push(d);
+  renderDiasSemanaFixo();
+  atualizarPreviewFixo();
+}
+
+function toggleOcorrenciaMensal(i){
+  if(fixoOcorrenciasSel.includes(i)) fixoOcorrenciasSel=fixoOcorrenciasSel.filter(x=>x!==i);
+  else fixoOcorrenciasSel.push(i);
+  renderOcorrenciasMensal();
+  atualizarPreviewFixo();
+}
+
+function setDiaSemanaMensal(d){
+  fixoDiaSemanaMensal=d;
+  renderDiaSemanaMensal();
+  atualizarPreviewFixo();
+}
+
+// Encontra a N-ésima ocorrência de um dia da semana em um mês/ano
+// ocorrenciaIdx: 0=1ª, 1=2ª, 2=3ª, 3=4ª, 4=última
+function encontrarOcorrenciaMensal(ano, mes, diaSemana, ocorrenciaIdx){
+  const datasNoMes=[];
+  const ultimoDia=new Date(ano, mes+1, 0).getDate();
+  for(let d=1; d<=ultimoDia; d++){
+    const dt=new Date(ano, mes, d);
+    if(dt.getDay()===diaSemana) datasNoMes.push(dt);
+  }
+  if(!datasNoMes.length) return null;
+  if(ocorrenciaIdx===4) return datasNoMes[datasNoMes.length-1]; // última
+  return datasNoMes[ocorrenciaIdx] || null;
+}
+
+function gerarDatasFixoMensal(){
+  const ini=document.getElementById('mp-fixo-ini').value;
+  const fim=document.getElementById('mp-fixo-fim').value;
+  if(!ini||!fim||fixoDiaSemanaMensal===null||!fixoOcorrenciasSel.length) return [];
+  const d0=new Date(ini+'T00:00:00'), d1=new Date(fim+'T00:00:00');
+  const datas=[];
+  let cur=new Date(d0.getFullYear(), d0.getMonth(), 1);
+  while(cur<=d1){
+    fixoOcorrenciasSel.forEach(ocIdx=>{
+      const data=encontrarOcorrenciaMensal(cur.getFullYear(), cur.getMonth(), fixoDiaSemanaMensal, ocIdx);
+      if(data && data>=d0 && data<=d1) datas.push(fmtD(data));
+    });
+    cur.setMonth(cur.getMonth()+1);
+  }
+  return [...new Set(datas)].sort((a,b)=>parseD(a)-parseD(b));
+}
+
+function atualizarPreviewFixo(){
+  const ini = document.getElementById('mp-fixo-ini').value;
+  const fim = document.getElementById('mp-fixo-fim').value;
+  const prev = document.getElementById('mp-fixo-preview');
+
+  if(fixoTipo==='semanal'){
+    if(!fixoDiasSel.length){ prev.textContent='Selecione pelo menos um dia da semana.'; prev.style.color='#c0392b'; return; }
+    if(!ini || !fim){ prev.textContent=''; return; }
+    const d0=new Date(ini+'T00:00:00'), d1=new Date(fim+'T00:00:00');
+    if(d1<d0){ prev.textContent='Data final anterior à inicial.'; prev.style.color='#c0392b'; return; }
+    let count=0, cur=new Date(d0);
+    while(cur<=d1){ if(fixoDiasSel.includes(cur.getDay())) count++; cur.setDate(cur.getDate()+1); }
+    const dias=fixoDiasSel.map(d=>DIAS_SEMANA_LABELS[d]).join(', ');
+    prev.style.color='var(--accent)';
+    prev.textContent=`${count} plantão(ões) serão criados — toda(s) ${dias}`;
+  } else {
+    if(fixoDiaSemanaMensal===null){ prev.textContent='Selecione o dia da semana.'; prev.style.color='#c0392b'; return; }
+    if(!fixoOcorrenciasSel.length){ prev.textContent='Selecione ao menos uma ocorrência (1ª, 2ª...).'; prev.style.color='#c0392b'; return; }
+    if(!ini || !fim){ prev.textContent=''; return; }
+    const d0=new Date(ini+'T00:00:00'), d1=new Date(fim+'T00:00:00');
+    if(d1<d0){ prev.textContent='Data final anterior à inicial.'; prev.style.color='#c0392b'; return; }
+    const datas=gerarDatasFixoMensal();
+    const ocLabel=fixoOcorrenciasSel.map(i=>OCORRENCIAS_LABELS[i]).join(', ');
+    const diaLabel=DIAS_SEMANA_LABELS[fixoDiaSemanaMensal];
+    prev.style.color='var(--accent)';
+    prev.textContent=`${datas.length} plantão(ões) serão criados — ${ocLabel} ${diaLabel} de cada mês`;
+  }
+}
+
+function gerarDatasFixo(){
+  if(fixoTipo==='mensal') return gerarDatasFixoMensal();
+  const ini = document.getElementById('mp-fixo-ini').value;
+  const fim = document.getElementById('mp-fixo-fim').value;
+  if(!ini || !fim || !fixoDiasSel.length) return [];
+  const d0 = new Date(ini+'T00:00:00'), d1 = new Date(fim+'T00:00:00');
+  const datas = [];
+  let cur = new Date(d0);
+  while(cur <= d1){
+    if(fixoDiasSel.includes(cur.getDay())) datas.push(fmtD(cur));
+    cur.setDate(cur.getDate()+1);
+  }
+  return datas;
+}
+
+// ═══════════════════════════════════════════════
+// MODAL META
+// ═══════════════════════════════════════════════
+function abrirModalMeta(mes=null){
+  const meta=getMeta(anoAtual);
+  document.getElementById('meta-anual').value=meta.anual||'';
+  const grid=document.getElementById('meta-meses-grid');
+  const temMeses=meta.meses && meta.meses.length===12;
+  grid.innerHTML=Array.from({length:12},(_,i)=>{
+    // Mostra o valor salvo (incluindo 0), campo vazio se não há meses salvos
+    const val=temMeses ? meta.meses[i] : '';
+    const placeholder=meta.anual>0?Math.round(meta.anual/12):'';
+    return`<div class="modal-field" style="margin:0;">
+      <label style="font-size:9px;">${MESES[i]}</label>
+      <input type="number" id="meta-mes-${i}" min="0" step="500"
+        placeholder="${placeholder}"
+        value="${val!==''&&val!==undefined?val:''}"
+        oninput="recalcMetaAnual()">
+    </div>`;
+  }).join('');
+  document.getElementById('modal-meta').classList.add('open');
+  if(mes!==null) setTimeout(()=>document.getElementById('meta-mes-'+mes)?.focus(),200);
+}
+
+function recalcMetaAnual(){
+  // Soma todos os meses: usa o valor digitado quando existe,
+  // e o valor implícito (placeholder, já dividido) quando o mês não foi editado.
+  // Isso garante que zerar/alterar um mês sempre reflita no total anual,
+  // mesmo que os outros meses nunca tenham sido tocados manualmente.
+  let soma=0;
+  for(let i=0;i<12;i++){
+    const inp=document.getElementById('meta-mes-'+i);
+    if(!inp) continue;
+    if(inp.value!==''){
+      soma+=parseFloat(inp.value)||0;
+    } else {
+      soma+=parseFloat(inp.placeholder)||0;
+    }
+  }
+  document.getElementById('meta-anual').value=soma;
+}
+
+function metaAnualChanged(){
+  // Quando o anual é digitado manualmente, distribui o RESTANTE
+  // (anual - soma dos meses já editados) entre os meses ainda não editados.
+  // Meses já editados (incluindo zerados) não são sobrescritos.
+  const anual=parseFloat(document.getElementById('meta-anual').value)||0;
+  let somaEditados=0, qtdNaoEditados=0;
+  for(let i=0;i<12;i++){
+    const inp=document.getElementById('meta-mes-'+i);
+    if(!inp) continue;
+    if(inp.value!=='') somaEditados+=parseFloat(inp.value)||0;
+    else qtdNaoEditados++;
+  }
+  const restante=Math.max(anual-somaEditados,0);
+  const porMes=qtdNaoEditados>0?Math.round(restante/qtdNaoEditados):0;
+  for(let i=0;i<12;i++){
+    const inp=document.getElementById('meta-mes-'+i);
+    if(inp&&inp.value==='') inp.placeholder=porMes;
+  }
+}
+function fecharModalMeta(){ document.getElementById('modal-meta').classList.remove('open'); }
+function confirmarMeta(){
+  // Lê todos os campos — campos vazios ficam como null (não editados)
+  // campos com valor (incluindo 0 explícito) ficam com o valor
+  const inputs=Array.from({length:12},(_,i)=>document.getElementById('meta-mes-'+i));
+  const mesesArr=inputs.map(inp=>{
+    if(!inp) return null;
+    const raw=inp.value;
+    if(raw===''||raw===null) return null; // não editado
+    return parseFloat(raw)||0; // editado — preserva zero explícito
+  });
+
+  const somaEditados=mesesArr.reduce((a,v)=>a+(v!==null?v:0),0);
+  const temEditados=mesesArr.some(v=>v!==null);
+  let anual=parseFloat(document.getElementById('meta-anual').value)||0;
+
+  let mesesFinal;
+  if(!temEditados){
+    // nenhum mês editado — distribui igualmente
+    const pm=Math.round(anual/12);
+    mesesFinal=Array(12).fill(pm);
+  } else {
+    // tem meses editados — preenche não-editados com o valor restante distribuído
+    const qtdNaoEditados=mesesArr.filter(v=>v===null).length;
+    const restante=anual-somaEditados;
+    const pmRestante=qtdNaoEditados>0?Math.round(restante/qtdNaoEditados):0;
+    mesesFinal=mesesArr.map(v=>v!==null?v:pmRestante);
+    anual=mesesFinal.reduce((a,v)=>a+v,0);
+  }
+
+  salvarMeta(anoAtual,anual,mesesFinal);
+  fecharModalMeta();
+}
+
+// ═══════════════════════════════════════════════
+// RELATÓRIO ANUAL IR — PDF
+// ═══════════════════════════════════════════════
+function gerarRelatorioIRAnual(){
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF({unit:'mm',format:'a4'});
+  const ml=12, mr=198, pw=mr-ml;
+  let y=0;
+
+  // ── Helpers ──────────────────────────────────
+  const setFont=(sz,style='normal',color=[40,40,50])=>{
+    doc.setFont('helvetica',style);
+    doc.setFontSize(sz);
+    doc.setTextColor(...color);
+  };
+  const txt=(t,x,yy,align='left')=>doc.text(String(t),x,yy,{align});
+  const linha=(yy,cor=[220,218,235])=>{
+    doc.setDrawColor(...cor);
+    doc.setLineWidth(0.2);
+    doc.line(ml,yy,mr,yy);
+  };
+  const rect=(x,yy,w,h,cor)=>{
+    doc.setFillColor(...cor);
+    doc.rect(x,yy,w,h,'F');
+  };
+  const novaPage=()=>{ doc.addPage(); y=14; };
+  const checkPage=(h=8)=>{ if(y+h>280) novaPage(); };
+
+  // Colunas da tabela
+  const C={
+    periodo:  {x:ml,    w:46},
+    pgto:     {x:ml+47, w:22},
+    bruto:    {x:ml+70, w:32},
+    taxa:     {x:ml+103,w:28},
+    ir:       {x:ml+132,w:28},
+    liq:      {x:ml+161,w:mr-(ml+161)},
+  };
+  const colRight=(col)=>C[col].x+C[col].w;
+
+  // ── CABEÇALHO ────────────────────────────────
+  rect(0,0,210,30,[22,20,36]);
+  setFont(15,'bold',[165,148,255]);
+  txt('Shiftr — Relatório Anual de IR',ml,12);
+  setFont(8,'normal',[180,175,210]);
+  txt(`${perfil.nome||'Médico'}   ·   Ano ${anoAtual}   ·   Gerado em ${new Date().toLocaleDateString('pt-BR')}`,ml,19);
+  setFont(7,'italic',[140,135,165]);
+  txt('Documento informativo. Consulte seu contador para declaração oficial.',ml,25);
+  y=38;
+
+  // ── HEADER TABELA ─────────────────────────────
+  const drawTableHeader=()=>{
+    rect(ml,y-4,pw,7,[45,42,65]);
+    setFont(7,'bold',[200,195,230]);
+    txt('PERÍODO',          C.periodo.x+1,y);
+    txt('PAGAMENTO',        C.pgto.x+1,   y);
+    txt('BRUTO',            colRight('bruto'),y,'right');
+    txt('TAXA',             colRight('taxa'),y,'right');
+    txt('IR',               colRight('ir'),y,'right');
+    txt('LÍQUIDO',          colRight('liq'),y,'right');
+    y+=5;
+  };
+
+  // ── POR HOSPITAL ─────────────────────────────
+  hospitais.forEach((h,hi)=>{
+    const cfg=getRegrasHosp(h.id);
+    const ciclos=gerarCiclos(cfg);
+    const regime=h.regime||'empresa';
+
+    checkPage(20);
+
+    // Cabeçalho do hospital
+    rect(ml,y-4,pw,9,[55,50,85]);
+    setFont(9,'bold',[165,148,255]);
+    txt(h.nome, ml+2, y);
+    setFont(7,'normal',[160,155,200]);
+    const regLabel=regime==='empresa'?'Empresa intermediaria':regime==='cnpj'?`CNPJ proprio - ${h.aliq||0}% IR`:'Pessoa fisica - Tabela progressiva';
+    txt(regLabel, mr-2, y, 'right');
+    y+=7;
+
+    drawTableHeader();
+
+    let totalBrutoH=0,totalTaxaH=0,totalIRH=0,totalLiqH=0;
+    let linePar=false;
+
+    ciclos.forEach(c=>{
+      if(c.pagamento.getFullYear()!==anoAtual) return;
+      const ps=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=c.inicio&&d<=c.fim;});
+      const bruto=ps.reduce((a,p)=>a+p.valor,0);
+      const taxa=bruto>0?(cfg.taxa||0):0;
+      const liq=bruto-taxa;
+      const ir=calcIR(liq,regime,h.aliq||0);
+      const liquido=liq-ir;
+      totalBrutoH+=bruto; totalTaxaH+=taxa; totalIRH+=ir; totalLiqH+=liquido;
+
+      checkPage(7);
+      if(linePar) rect(ml,y-3.5,pw,5.5,[242,241,248]);
+      linePar=!linePar;
+
+      setFont(7,'normal',[30,28,40]);
+      txt(`${fmtD(c.inicio)} - ${fmtD(c.fim)}`, C.periodo.x+1, y);
+      txt(fmtD(c.pagamento), C.pgto.x+1, y);
+      setFont(7,'normal', bruto>0?[30,28,40]:[150,148,160]);
+      txt(brl(bruto), colRight('bruto'), y, 'right');
+      if(taxa>0){
+        setFont(7,'normal',[160,90,30]);
+        txt('-'+brl(taxa), colRight('taxa'), y, 'right');
+      }
+      if(ir>0){
+        setFont(7,'bold',[180,80,0]);
+        txt('-'+brl(ir), colRight('ir'), y, 'right');
+        setFont(7,'bold',[0,130,60]);
+        txt(brl(liquido), colRight('liq'), y, 'right');
+      } else if(regime==='empresa'&&bruto>0){
+        setFont(7,'normal',[140,138,155]);
+        txt('(emp.)', colRight('liq'), y, 'right');
+      }
+      y+=5.5;
+    });
+
+    // Subtotal hospital
+    checkPage(8);
+    linha(y-1,[80,75,110]);
+    rect(ml,y,pw,7,[42,38,62]);
+    setFont(8,'bold',[165,148,255]);
+    txt(`Total ${h.nome}`, ml+2, y+5);
+    setFont(8,'bold',[200,198,220]);
+    txt(brl(totalBrutoH), colRight('bruto'), y+5, 'right');
+    if(totalTaxaH>0){ setFont(8,'bold',[180,130,100]); txt('-'+brl(totalTaxaH), colRight('taxa'), y+5, 'right'); }
+    if(regime!=='empresa'){
+      setFont(8,'bold',[220,150,80]);
+      txt('-'+brl(totalIRH), colRight('ir'), y+5, 'right');
+      setFont(8,'bold',[80,200,130]);
+      txt(brl(totalLiqH), colRight('liq'), y+5, 'right');
+    }
+    y+=12;
+  });
+
+  // ── TOTAL GERAL ───────────────────────────────
+  checkPage(18);
+  let gBruto=0,gTaxa=0,gIR=0,gLiq=0;
+  hospitais.forEach(h=>{
+    const cfg=getRegrasHosp(h.id);
+    gerarCiclos(cfg).forEach(c=>{
+      if(c.pagamento.getFullYear()!==anoAtual) return;
+      const ps=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=c.inicio&&d<=c.fim;});
+      const bruto=ps.reduce((a,p)=>a+p.valor,0);
+      const taxa=bruto>0?(cfg.taxa||0):0;
+      const liq=bruto-taxa;
+      const ir=calcIR(liq,h.regime||'empresa',h.aliq||0);
+      gBruto+=bruto; gTaxa+=taxa; gIR+=ir; gLiq+=(liq-ir);
+    });
+  });
+
+  linha(y,[100,95,140]);
+  y+=3;
+  rect(ml,y,pw,11,[22,20,36]);
+  setFont(9,'bold',[165,148,255]);
+  txt(`TOTAL ANUAL ${anoAtual}`, ml+2, y+7);
+  setFont(9,'bold',[200,198,220]);
+  txt(brl(gBruto), colRight('bruto'), y+7, 'right');
+  if(gTaxa>0){ setFont(9,'bold',[180,130,100]); txt('-'+brl(gTaxa), colRight('taxa'), y+7, 'right'); }
+  setFont(9,'bold',[220,150,80]);
+  txt('-'+brl(gIR), colRight('ir'), y+7, 'right');
+  setFont(9,'bold',[80,220,140]);
+  txt(brl(gLiq), colRight('liq'), y+7, 'right');
+  y+=18;
+
+  // ── RESUMO IR POR REGIME ──────────────────────
+  checkPage(30);
+  setFont(8,'bold',[165,148,255]);
+  txt('Resumo por regime tributario', ml, y); y+=6;
+  linha(y-1,[80,75,110]);
+
+  const grupos={empresa:{label:'Empresa intermediaria',bruto:0,taxa:0,ir:0,liq:0},
+                cnpj:{label:'CNPJ proprio',bruto:0,taxa:0,ir:0,liq:0},
+                pf:{label:'Pessoa fisica',bruto:0,taxa:0,ir:0,liq:0}};
+  hospitais.forEach(h=>{
+    const r=h.regime||'empresa';
+    if(!grupos[r]) return;
+    const cfg=getRegrasHosp(h.id);
+    gerarCiclos(cfg).forEach(c=>{
+      if(c.pagamento.getFullYear()!==anoAtual) return;
+      const ps=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=c.inicio&&d<=c.fim;});
+      const b=ps.reduce((a,p)=>a+p.valor,0);
+      const t=b>0?(cfg.taxa||0):0;
+      const l=b-t;
+      const ir=calcIR(l,r,h.aliq||0);
+      grupos[r].bruto+=b; grupos[r].taxa+=t; grupos[r].ir+=ir; grupos[r].liq+=(l-ir);
+    });
+  });
+
+  Object.values(grupos).forEach(g=>{
+    if(g.bruto===0) return;
+    checkPage(6);
+    setFont(8,'normal',[30,28,40]);
+    txt(g.label, ml+2, y);
+    txt(brl(g.bruto), colRight('bruto'), y, 'right');
+    if(g.taxa>0){ setFont(8,'normal',[160,90,30]); txt('-'+brl(g.taxa), colRight('taxa'), y, 'right'); }
+    setFont(8,'bold',[180,80,0]);
+    txt(g.ir>0?'-'+brl(g.ir):'—', colRight('ir'), y, 'right');
+    setFont(8,'bold',[0,130,60]);
+    txt(brl(g.liq), colRight('liq'), y, 'right');
+    y+=6;
+  });
+
+  // ── RODAPÉ ────────────────────────────────────
+  const totalPages=doc.getNumberOfPages();
+  for(let i=1;i<=totalPages;i++){
+    doc.setPage(i);
+    setFont(6,'italic',[120,118,140]);
+    doc.text(`Shiftr  ·  Relatorio Anual IR ${anoAtual}  ·  Pagina ${i}/${totalPages}`,105,292,{align:'center'});
+  }
+
+  doc.save(`shiftr-ir-${anoAtual}.pdf`);
+}
+
+function gerarRelatorioIRHosp(hospId){
+  // Relatório individual por hospital — chama o anual filtrado
+  gerarRelatorioIRAnual(hospId);
+}
+
+// ═══════════════════════════════════════════════
+// DIVISÃO DE DESCANSO
+// ═══════════════════════════════════════════════
+let _divisaoAtual = [];
+
+function dividirHorarios(){
+  const iniStr=document.getElementById('div-ini').value;
+  const fimStr=document.getElementById('div-fim').value;
+  const numPessoas=parseInt(document.getElementById('div-pessoas').value)||1;
+
+  if(!iniStr||!fimStr){ alert('Preencha hora inicial e final.'); return; }
+
+  const [hIni,mIni]=iniStr.split(':').map(Number);
+  const [hFim,mFim]=fimStr.split(':').map(Number);
+
+  let minutosIni=hIni*60+mIni;
+  let minutosFim=hFim*60+mFim;
+  if(minutosFim<=minutosIni) minutosFim+=24*60;
+
+  const totalMinutos=minutosFim-minutosIni;
+  const minutosPorPessoa=totalMinutos/numPessoas;
+
+  const fmtHora=(min)=>{
+    const m=((min%(24*60))+24*60)%(24*60);
+    const h=Math.floor(m/60);
+    const mm=Math.round(m%60);
+    return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+  };
+
+  _divisaoAtual=[];
+  for(let i=0;i<numPessoas;i++){
+    const ini=minutosIni+i*minutosPorPessoa;
+    const fim=minutosIni+(i+1)*minutosPorPessoa;
+    _divisaoAtual.push({pessoa:i+1, inicio:fmtHora(ini), fim:fmtHora(fim)});
+  }
+
+  const lista=document.getElementById('div-lista');
+  lista.innerHTML=_divisaoAtual.map(d=>
+    `<div>Pessoa ${d.pessoa}: Início - ${d.inicio}, Fim - ${d.fim}</div>`
+  ).join('');
+  document.getElementById('div-resultado').style.display='block';
+}
+
+function limparDivisao(){
+  _divisaoAtual=[];
+  document.getElementById('div-resultado').style.display='none';
+  document.getElementById('div-lista').innerHTML='';
+}
+
+function compartilharDivisao(){
+  if(!_divisaoAtual.length) return;
+  const ini=document.getElementById('div-ini').value;
+  const fim=document.getElementById('div-fim').value;
+  let texto=`*Divisão de Descanso* (${ini} às ${fim})\n\n`;
+  texto+=_divisaoAtual.map(d=>`Pessoa ${d.pessoa}: ${d.inicio} - ${d.fim}`).join('\n');
+  const url=`https://wa.me/?text=${encodeURIComponent(texto)}`;
+  window.open(url,'_blank');
+}
+
+let documentos = [];
+let editDocId = null;
+let _docArquivoBase64 = null; // arquivo em memória durante edição
+let _docArquivoMime   = null;
+let _docArquivoNome   = null;
+
+const TIPO_ICONS = {curso:'📋',crm:'🪪',rqe:'🏅',alvara:'📄',outros:'📎'};
+const MAX_FILE_BYTES = 500 * 1024; // 500KB
+
+function diasParaVencer(dataStr){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const val  = new Date(dataStr+'T00:00:00');
+  return Math.floor((val-hoje)/(1000*60*60*24));
+}
+function statusDoc(doc){
+  if(!doc.validade) return {cls:'ok',label:'Sem vencimento'};
+  const dias = diasParaVencer(doc.validade);
+  if(dias<0)   return {cls:'vencido',label:`Vencido há ${Math.abs(dias)}d`};
+  if(dias<=30) return {cls:'alerta', label:`Vence em ${dias}d`};
+  return {cls:'ok', label:`Válido por ${dias}d`};
+}
+
+function handleDocFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const erroEl = document.getElementById('md-file-erro');
+  erroEl.style.display='none';
+
+  if(file.size > MAX_FILE_BYTES){
+    erroEl.textContent=`Arquivo muito grande: ${(file.size/1024).toFixed(0)}KB. Máximo: 500KB.`;
+    erroEl.style.display='block';
+    event.target.value='';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const result = e.target.result; // data:mime;base64,...
+    const [header, b64] = result.split(',');
+    _docArquivoBase64 = b64;
+    _docArquivoMime   = file.type;
+    _docArquivoNome   = file.name;
+    mostrarPreviewArquivo(file.name, file.size, file.type);
+    // preenche nome do documento se estiver vazio
+    const nomeEl = document.getElementById('md-nome');
+    if(!nomeEl.value) nomeEl.value = file.name.replace(/\.[^.]+$/,'');
+  };
+  reader.readAsDataURL(file);
+}
+
+function mostrarPreviewArquivo(nome, size, mime){
+  const icon = mime==='application/pdf'?'📄':mime.startsWith('image')?'🖼':'📎';
+  document.getElementById('md-file-icon').textContent=icon;
+  document.getElementById('md-file-name').textContent=nome;
+  document.getElementById('md-file-size').textContent=`${(size/1024).toFixed(1)} KB`;
+  document.getElementById('md-file-preview').style.display='block';
+  document.getElementById('md-upload-label').style.opacity='0.4';
+}
+
+function removerArquivoDoc(){
+  _docArquivoBase64=null; _docArquivoMime=null; _docArquivoNome=null;
+  document.getElementById('md-file').value='';
+  document.getElementById('md-file-preview').style.display='none';
+  document.getElementById('md-upload-label').style.opacity='1';
+}
+
+function renderDocs(){
+  const list = document.getElementById('docs-list');
+  if(!list) return;
+  if(!documentos.length){
+    list.innerHTML=`<div class="empty-state">Nenhum documento cadastrado</div>`;
+    return;
+  }
+  const sorted=[...documentos].sort((a,b)=>{
+    const da=a.validade?diasParaVencer(a.validade):9999;
+    const db=b.validade?diasParaVencer(b.validade):9999;
+    return da-db;
+  });
+  list.innerHTML=sorted.map(doc=>{
+    const{cls,label}=statusDoc(doc);
+    const icon=TIPO_ICONS[doc.tipo]||'📎';
+    const temArq = !!doc.arquivo;
+    return`<div class="doc-item ${cls}" onclick="abrirModalDoc('${doc.id}')">
+      <span class="doc-icon">${icon}</span>
+      <div class="doc-info">
+        <div class="doc-nome">${doc.nome}${temArq?' 📎':''}</div>
+        <div class="doc-inst">${doc.inst||''}</div>
+      </div>
+      <div class="doc-val ${cls}">${label}</div>
+    </div>`;
+  }).join('');
+}
+
+function abrirModalDoc(id=null){
+  editDocId=id;
+  _docArquivoBase64=null; _docArquivoMime=null; _docArquivoNome=null;
+  const doc=id?documentos.find(d=>d.id===id):null;
+  document.getElementById('md-title').textContent=doc?'Editar documento':'Novo documento';
+  document.getElementById('md-tipo').value=doc?.tipo||'curso';
+  document.getElementById('md-nome').value=doc?.nome||'';
+  document.getElementById('md-inst').value=doc?.inst||'';
+  document.getElementById('md-val').value=doc?.validade||'';
+  document.getElementById('md-erro').style.display='none';
+  document.getElementById('md-file-erro').style.display='none';
+  document.getElementById('md-file').value='';
+  document.getElementById('md-file-preview').style.display='none';
+  document.getElementById('md-upload-label').style.opacity='1';
+  document.getElementById('md-del').style.display=doc?'block':'none';
+
+  // Se já tem arquivo, mostrar info e botões
+  const acoesEl=document.getElementById('md-acoes-existente');
+  if(doc?.arquivo){
+    mostrarPreviewArquivo(doc.arquivoNome||'arquivo', doc.arquivoSize||0, doc.arquivoMime||'');
+    acoesEl.style.display='block';
+  } else {
+    acoesEl.style.display='none';
+  }
+  document.getElementById('modal-doc').classList.add('open');
+}
+function fecharModalDoc(){
+  document.getElementById('modal-doc').classList.remove('open');
+  editDocId=null;
+}
+
+function salvarDoc(){
+  const nome=document.getElementById('md-nome').value.trim();
+  const erro=document.getElementById('md-erro');
+  if(!nome){ erro.textContent='Informe o nome do documento.'; erro.style.display='block'; return; }
+
+  const btn=document.getElementById('md-btn-salvar');
+  btn.textContent='Salvando...'; btn.disabled=true;
+
+  const docAtual = editDocId ? documentos.find(d=>d.id===editDocId) : null;
+  const novoId = editDocId || uid();
+  const dados={
+    id:        novoId,
+    tipo:      document.getElementById('md-tipo').value,
+    nome,
+    inst:      document.getElementById('md-inst').value.trim(),
+    validade:  document.getElementById('md-val').value||null,
+    arquivo:     _docArquivoBase64 || docAtual?.arquivo || null,
+    arquivoMime: _docArquivoMime   || docAtual?.arquivoMime || null,
+    arquivoNome: _docArquivoNome   || docAtual?.arquivoNome || null,
+    arquivoSize: _docArquivoBase64 ? Math.round((_docArquivoBase64.length*3)/4) : (docAtual?.arquivoSize||0)
+  };
+  if(editDocId){
+    const idx=documentos.findIndex(x=>x.id===editDocId);
+    if(idx>=0) documentos[idx]=dados; else documentos.push(dados);
+  } else {
+    documentos.push(dados);
+  }
+  // Salva na subcoleção — cada doc tem seu próprio espaço
+  salvarDocFirestore(dados);
+  btn.textContent='Salvar'; btn.disabled=false;
+  fecharModalDoc(); renderDocs(); verificarAlertas();
+}
+
+function excluirDoc(){
+  if(!editDocId||!confirm('Excluir este documento?')) return;
+  excluirDocFirestore(editDocId);
+  documentos=documentos.filter(d=>d.id!==editDocId);
+  fecharModalDoc(); renderDocs(); verificarAlertas();
+}
+
+function verDocumento(){
+  const doc=documentos.find(d=>d.id===editDocId);
+  if(!doc?.arquivo) return;
+  // Converte base64 para Blob e abre como URL de objeto
+  const byteChars = atob(doc.arquivo);
+  const byteArr = new Uint8Array(byteChars.length);
+  for(let i=0;i<byteChars.length;i++) byteArr[i]=byteChars.charCodeAt(i);
+  const blob = new Blob([byteArr], {type: doc.arquivoMime||'application/pdf'});
+  const blobUrl = URL.createObjectURL(blob);
+  const win = window.open(blobUrl, '_blank');
+  // Libera memória após abrir
+  if(win) setTimeout(()=>URL.revokeObjectURL(blobUrl), 10000);
+}
+
+function baixarDocumento(){
+  const doc=documentos.find(d=>d.id===editDocId);
+  if(!doc?.arquivo) return;
+  const dataUrl=`data:${doc.arquivoMime};base64,${doc.arquivo}`;
+  const a=document.createElement('a');
+  a.href=dataUrl; a.download=doc.arquivoNome||doc.nome;
+  a.click();
+}
+
+// ═══════════════════════════════════════════════
+// ALERTAS
+// ═══════════════════════════════════════════════
+function fecharAlertas(){ document.getElementById('painel-alertas').style.display='none'; }
+
+function verificarAlertas(){
+  const alertas=[];
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+
+  // 1. Documentos vencidos ou vencendo em 30 dias
+  documentos.forEach(doc=>{
+    if(!doc.validade) return;
+    const dias=diasParaVencer(doc.validade);
+    if(dias<0){
+      alertas.push({tipo:'critico',emoji:'🚨',
+        titulo:`${doc.nome} — VENCIDO`,
+        sub:`Venceu há ${Math.abs(dias)} dias. Renove imediatamente.`});
+    } else if(dias<=30){
+      alertas.push({tipo:'aviso',emoji:'⚠️',
+        titulo:`${doc.nome} — vence em ${dias} dia${dias===1?'':'s'}`,
+        sub:`Validade: ${new Date(doc.validade+'T00:00:00').toLocaleDateString('pt-BR')}${doc.inst?' · '+doc.inst:''}`});
+    }
+  });
+
+  // 2. IR próximo (CNPJ próprio ou PF) — avisa 10 dias antes do vencimento de cada ciclo
+  hospitais.forEach(h=>{
+    if(!h.regime||h.regime==='empresa') return;
+    const cfg=getRegrasHosp(h.id);
+    const ciclos=gerarCiclos(cfg);
+    ciclos.forEach(c=>{
+      const diasPgto=Math.floor((c.pagamento-hoje)/(1000*60*60*24));
+      if(diasPgto<0||diasPgto>10) return;
+      const ps=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=c.inicio&&d<=c.fim;});
+      const bruto=ps.reduce((a,p)=>a+p.valor,0);
+      if(bruto<=0) return;
+      const desc=bruto>0?(cfg.taxa||0):0;
+      const liq=bruto-desc;
+      const ir=calcIR(liq,h.regime,h.aliq||0);
+      if(ir<=0) return;
+      const label=h.regime==='pf'?'IRPF — carnê-leão':`IR ${h.regime==='cnpj'?'CNPJ':''}`;
+      alertas.push({tipo:'ir',emoji:'📊',
+        titulo:`${label} vence em ${diasPgto===0?'HOJE':diasPgto+' dia'+(diasPgto===1?'':'s')} — ${h.nome}`,
+        sub:`Ciclo ${fmtD(c.inicio)}–${fmtD(c.fim)} · Bruto ${brl(bruto)} · IR a recolher: ${brl(ir)}\nPagamento previsto: ${fmtD(c.pagamento)}`});
+    });
+  });
+
+  if(!alertas.length) return;
+
+  const content=document.getElementById('alertas-content');
+  content.innerHTML=alertas.map(a=>`
+    <div class="alerta-item ${a.tipo}">
+      <span class="alerta-emoji">${a.emoji}</span>
+      <div class="alerta-texto">
+        <div class="alerta-titulo">${a.titulo}</div>
+        <div class="alerta-sub">${a.sub.replace(/\n/g,'<br>')}</div>
+      </div>
+    </div>`).join('');
+
+  // Mostra badge no botão de documentos
+  const badge=alertas.length;
+  const btnDoc=document.getElementById('btn-docs-body');
+  if(btnDoc) btnDoc.textContent=`${badge > 0 ? '🔴 ' : '+'}${badge > 0 ? badge : ''}`;
+
+  document.getElementById('painel-alertas').style.display='block';
+}
+// ═══════════════════════════════════════════════
+// META MENSAL / ANUAL
+// ═══════════════════════════════════════════════
+let metas = {};
+
+function getMeta(ano){ if(!metas[ano]) metas[ano]={anual:0,meses:Array(12).fill(0)}; return metas[ano]; }
+function getMetaMes(ano,mes){
+  const m=getMeta(ano);
+  // Se o mês tem valor salvo (incluindo 0 explícito), usa ele
+  // Só usa anual/12 se o array de meses está vazio/não definido
+  if(m.meses && m.meses.length===12) return m.meses[mes];
+  return m.anual>0 ? Math.round(m.anual/12) : 0;
+}
+function salvarMeta(ano,anual,mesesArr){
+  metas[ano]={anual:anual||0, meses:mesesArr||Array(12).fill(0)};
+  saveFS();
+  renderDashboard();
+}
+
+// ═══════════════════════════════════════════════
+function navAno(d){ anoAtual+=d; render(); }
+
+// ═══════════════════════════════════════════════
+// RENDER SIDEBAR — HOSPITAIS
+// ═══════════════════════════════════════════════
+function renderHospList(){
+  const el=document.getElementById('hosp-list');
+  if(!hospitais.length){ el.innerHTML=''; return; }
+  el.innerHTML=hospitais.map(h=>`
+    <div class="hosp-chip${hospSel===h.id?' selected':''}" style="${hospSel===h.id?'border-color:'+h.cor:''}" onclick="selecionarHosp('${h.id}')">
+      <div class="hosp-dot" style="background:${h.cor}"></div>
+      <span class="hosp-name">${h.nome}</span>
+      <button class="hosp-edit-btn" onclick="event.stopPropagation();abrirModalHosp('${h.id}')">&#9998;</button>
+    </div>`).join('');
+}
+function selecionarHosp(id){ hospSel=hospSel===id?null:id; renderHospList(); }
+
+// ═══════════════════════════════════════════════
+// RENDER MÉTRICAS
+// ═══════════════════════════════════════════════
+function renderMetrics(){
+  const el=document.getElementById('resumo-metrics');
+  // total geral do ano
+  const plantõesAno=plantoes.filter(p=>parseD(p.data).getFullYear()===anoAtual);
+  const totalAno=plantõesAno.reduce((a,p)=>a+p.valor,0);
+  let html=`<div class="metric"><span class="metric-label">Total ${anoAtual}</span><span class="metric-value">${brl(totalAno)}</span></div>`;
+  // por hospital
+  hospitais.forEach(h=>{
+    const tot=plantõesAno.filter(p=>p.hospId===h.id).reduce((a,p)=>a+p.valor,0);
+    if(tot>0) html+=`<div class="metric"><span class="metric-label" style="color:${h.cor}">${h.nome}</span><span class="metric-value">${brl(tot)}</span></div>`;
+  });
+  el.innerHTML=html;
+}
+
+// ═══════════════════════════════════════════════
+// RENDER LISTA PLANTÕES
+// ═══════════════════════════════════════════════
+function renderLista(){ /* lista removida da sidebar — exclusão apenas pelo calendário */ }
+function removerPlantaoId(id){ plantoes=plantoes.filter(p=>p.id!==id); save(); render(); }
+
+// ═══════════════════════════════════════════════
+// RENDER CALENDÁRIOS
+// ═══════════════════════════════════════════════
+function renderMonths(){
+  const grid=document.getElementById('months-grid');
+  grid.innerHTML='';
+  for(let m=1;m<=12;m++) grid.appendChild(buildMonthCard(m,anoAtual));
+}
+
+function buildMonthCard(mes,ano){
+  const todayStr=fmtD(new Date());
+  const hoje=new Date();
+  const isCur=mes===hoje.getMonth()+1&&ano===hoje.getFullYear();
+  const plantoesMes=plantoes.filter(p=>{const d=parseD(p.data);return d.getMonth()+1===mes&&d.getFullYear()===ano;});
+  const totalMes=plantoesMes.reduce((a,p)=>a+p.valor,0);
+
+  const card=document.createElement('div');
+  card.className='month-card'+(isCur?' current-month':'');
+  card.id='month-card-'+(mes-1);
+
+  // header
+  const hdr=document.createElement('div'); hdr.className='mc-header';
+  // construir breakdown por hospital
+  let totaisHtml='';
+  if(totalMes>0){
+    hospitais.forEach(h=>{
+      const tot=plantoesMes.filter(p=>p.hospId===h.id).reduce((a,p)=>a+p.valor,0);
+      if(tot>0) totaisHtml+=`<div class="mc-hosp-line"><div class="mc-hosp-dot" style="background:${h.cor}"></div>${brl(tot)}</div>`;
+    });
+    const hospsNoMes=hospitais.filter(h=>plantoesMes.some(p=>p.hospId===h.id));
+    if(hospsNoMes.length>1) totaisHtml+=`<div class="mc-total-sum">${brl(totalMes)}</div>`;
+  }
+  hdr.innerHTML=`<div><div class="mc-title">${MESES[mes-1]}</div><span class="mc-month-num">${String(mes).padStart(2,'0')} · ${ano}</span></div>`
+    +(totaisHtml?`<div class="mc-totals">${totaisHtml}</div>`:'');
+  card.appendChild(hdr);
+
+  // dias semana
+  const dow=document.createElement('div'); dow.className='mc-dow';
+  ['S','T','Q','Q','S','S','D'].forEach(l=>{
+    const c=document.createElement('div');c.className='mc-dow-cell';c.textContent=l;dow.appendChild(c);
+  });
+  card.appendChild(dow);
+
+  // grid de dias
+  const g=document.createElement('div'); g.className='mc-grid';
+  const primeiro=new Date(ano,mes-1,1);
+  const startCol=(primeiro.getDay()+6)%7;
+  for(let i=0;i<startCol;i++){const e=document.createElement('div');e.className='mc-day mc-empty';g.appendChild(e);}
+
+  const diasNoMes=new Date(ano,mes,0).getDate();
+  for(let d=1;d<=diasNoMes;d++){
+    const dObj=new Date(ano,mes-1,d);
+    const ds=fmtD(dObj);
+    const dayPlantoes=plantoes.filter(p=>p.data===ds);
+
+    const el=document.createElement('div');
+    let cls='mc-day';
+    if(isWE(dObj)) cls+=' mc-weekend';
+    if(ds===todayStr) cls+=' mc-today';
+    el.className=cls;
+
+    // número do dia
+    const num=document.createElement('div'); num.className='mc-dnum'; num.textContent=d;
+    el.appendChild(num);
+
+    // visual: célula dividida ao meio por turno/hospital
+    if(dayPlantoes.length){
+      const diurnos  = dayPlantoes.filter(p=>p.turno!=='Noturno');
+      const noturnos = dayPlantoes.filter(p=>p.turno==='Noturno');
+      const temAmbos = diurnos.length>0 && noturnos.length>0;
+
+      // helper: cor sólida ou gradiente horizontal para grupo
+      function corGrupo(grupo){
+        if(grupo.length===1){
+          const c=getHosp(grupo[0].hospId)?.cor||'#aaa';
+          return hexComAlpha(c, 0.72);
+        }
+        const stops=grupo.map((p,i)=>{
+          const c=getHosp(p.hospId)?.cor||'#aaa';
+          const ca=hexComAlpha(c, 0.72);
+          const a=Math.round(i/grupo.length*100), b=Math.round((i+1)/grupo.length*100);
+          return `${ca} ${a}%,${ca} ${b}%`;
+        });
+        return `linear-gradient(90deg,${stops.join(',')})`;
+      }
+
+      function iconeGrupo(grupo){
+        if(!grupo.length) return '';
+        const t=grupo[0].turno;
+        return t==='Noturno'?'☽':t==='Diurno'?'☀':'⏱';
+      }
+
+      // função auxiliar para cor de texto legível sobre cor de fundo
+      function textoLegivel(hexCor){
+        // luminância simples — retorna branco ou preto
+        const hex=hexCor.replace('#','');
+        if(hex.length!==6) return '#fff';
+        const r=parseInt(hex.slice(0,2),16);
+        const g=parseInt(hex.slice(2,4),16);
+        const b=parseInt(hex.slice(4,6),16);
+        const lum=(0.299*r+0.587*g+0.114*b)/255;
+        return lum>0.55?'rgba(0,0,0,.7)':'rgba(255,255,255,.9)';
+      }
+
+      const halves=document.createElement('div'); halves.className='mc-halves';
+      el.classList.add('has-plantao');
+
+      if(temAmbos){
+        const corD=corGrupo(diurnos);
+        const corN=corGrupo(noturnos);
+        const corTextoD=textoLegivel(getHosp(diurnos[0].hospId)?.cor||'#aaa');
+        const corTextoN=textoLegivel(getHosp(noturnos[0].hospId)?.cor||'#aaa');
+        // borda da célula com a cor do diurno (mais clara)
+
+
+        const ttD=diurnos.map(p=>(getHosp(p.hospId)?.nome||'?')+' · '+(p.turno==='Custom'?p.hIni+'–'+p.hFim:'07:00–19:00')+' · '+brl(p.valor)).join(' | ');
+        const ttN=noturnos.map(p=>(getHosp(p.hospId)?.nome||'?')+' · '+(p.turno==='Custom'?p.hIni+'–'+p.hFim:'19:00–07:00')+' · '+brl(p.valor)).join(' | ');
+        const icD = iconeGrupo(diurnos);
+        const icN = iconeGrupo(noturnos);
+        halves.innerHTML=
+          `<div class="mc-half" style="background:${corD};color:${corTextoD}" title="${ttD}"><span class="mc-half-icon">${icD}</span></div>`+
+          `<div class="mc-divider"></div>`+
+          `<div class="mc-half" style="background:${corN};color:${corTextoN}" title="${ttN}"><span class="mc-half-icon">${icN}</span></div>`;
+      } else {
+        const grupo=diurnos.length?diurnos:noturnos;
+        const corF=corGrupo(grupo);
+        const ic=iconeGrupo(grupo);
+        const lbl=noturnos.length?'NOTURNO':'DIURNO';
+        const corTexto=textoLegivel(getHosp(grupo[0].hospId)?.cor||'#aaa');
+
+        const ttF=grupo.map(p=>(getHosp(p.hospId)?.nome||'?')+' · '+(p.turno==='Custom'?p.hIni+'–'+p.hFim:p.turno==='Noturno'?'19:00–07:00':'07:00–19:00')+' · '+brl(p.valor)).join(' | ');
+        halves.innerHTML=`<div class="mc-half-full" style="background:${corF};color:${corTexto}" title="${ttF}"><span class="mc-half-icon">${ic}</span></div>`;
+      }
+
+      el.appendChild(halves);
+    }
+
+    el.onclick=()=>abrirModalPlantao(ds);
+    g.appendChild(el);
+  }
+  card.appendChild(g);
+  return card;
+}
+
+// ═══════════════════════════════════════════════
+// PREVISÃO
+// ═══════════════════════════════════════════════
+// regras por hospital unificadas no objeto global `regras`
+// (carregadas/salvas via Firestore junto com os demais dados)
+let regrasHosp = {};  // alias local para compatibilidade
+
+function carregarRegras(){
+  regrasHosp = regras; // sincroniza com o objeto global
+}
+function salvarRegrasHosp(hospId){
+  const inicio=+document.getElementById('rh-ini-'+hospId).value||21;
+  const fim=   +document.getElementById('rh-fim-'+hospId).value||20;
+  const pgto=  +document.getElementById('rh-pgto-'+hospId).value||15;
+  const meses= +document.getElementById('rh-mp-'+hospId).value||1;
+  const taxa=  parseFloat(document.getElementById('rh-taxa-'+hospId).value)||0;
+  regrasHosp[hospId]={inicio,fim,pgto,mesesPgto:meses,taxa};
+  regras = regrasHosp;
+  saveFS();
+  const el=document.getElementById('rh-res-'+hospId);
+  if(el) el.textContent=resumoRegra({inicio,fim,pgto,mesesPgto:meses,taxa});
+  renderPrevisao();
+  // Atualiza dashboard se estiver ativo
+  if(document.getElementById('page-dash').classList.contains('active')) renderDashboard();
+  // Feedback visual no botão
+  const btns=document.querySelectorAll(`[onclick="salvarRegrasHosp('${hospId}')"]`);
+  btns.forEach(btn=>{ btn.textContent='✓ Salvo!'; setTimeout(()=>btn.textContent='✓ Salvar regras',1500); });
+}
+function getRegrasHosp(hospId){
+  const r=regrasHosp[hospId];
+  return{inicio:r?.inicio||21,fim:r?.fim||20,pgto:r?.pgto||15,mesesPgto:r?.mesesPgto||1,taxa:r?.taxa||0};
+}
+function toggleRegrasHosp(hospId){
+  const p=document.getElementById('rh-painel-'+hospId);
+  const b=document.getElementById('rh-btn-'+hospId);
+  const abre=!p.classList.contains('open');
+  p.classList.toggle('open');
+  if(b) b.classList.toggle('ativo', abre);
+}
+
+function toggleHospPrev(hospId){
+  const body=document.getElementById('ph-body-'+hospId);
+  const btn=document.getElementById('ph-tog-'+hospId);
+  if(!body) return;
+  const oculto=body.style.display==='none';
+  body.style.display=oculto?'':'none';
+  if(btn) btn.textContent=oculto?'−':'+';
+}
+
+function ultimoDiaMes(ano,mes){return new Date(ano,mes+1,0).getDate();}
+function dataSegura(ano,mes,dia){return new Date(ano,mes,Math.min(dia,ultimoDiaMes(ano,mes)));}
+
+function gerarCiclos(cfg){
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const anoRef=hoje.getFullYear();
+  const ciclos=[];
+  let sm=10,sy=anoRef-1;
+  for(let g=0;g<20;g++){
+    const inicio=dataSegura(sy,sm,cfg.inicio);
+    // Se fim >= início: ciclo dentro do mesmo mês
+    // Se fim < início: ciclo cruza para o mês seguinte (ex: dia 21 ao 20)
+    let ef,fy;
+    if(cfg.fim>=cfg.inicio){
+      // mesmo mês
+      ef=sm; fy=sy;
+    } else {
+      // mês seguinte
+      ef=sm+1; fy=sy;
+      if(ef>11){ef=0;fy++;}
+    }
+    const fim=dataSegura(fy,ef,cfg.fim);
+    let pp=ef+cfg.mesesPgto,py=fy;while(pp>11){pp-=12;py++;}
+    const pagamento=dataSegura(py,pp,cfg.pgto);
+    if(pagamento.getFullYear()>anoRef) break;
+    if(pagamento.getFullYear()===anoRef||fim>=hoje) ciclos.push({inicio,fim,pagamento});
+    sm++;if(sm>11){sm=0;sy++;}
+  }
+  return ciclos;
+}
+
+function statusCiclo(c){
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const fimP=c.fim<hoje,pagP=c.pagamento<hoje,iniH=c.inicio<=hoje;
+  if(pagP) return{status:'Pago',badge:'badge-pago',dias:'Pago em '+fmtD(c.pagamento)};
+  if(fimP){const df=Math.ceil((c.pagamento-hoje)/86400000);return{status:'Aguardando',badge:'badge-aguard',dias:'Pagamento em '+df+' dia'+(df!==1?'s':'')};}
+  if(iniH){const df=Math.ceil((c.fim-hoje)/86400000);return{status:'Parcial',badge:'badge-parcial',dias:'Fecha em '+df+' dia'+(df!==1?'s':'')};}
+  return{status:'Futuro',badge:'badge-aberto',dias:'Inicia em '+fmtD(c.inicio)};
+}
+
+function resumoRegra(cfg){
+  return `Dia ${cfg.inicio} ao ${cfg.fim} → pagto dia ${cfg.pgto} após ${cfg.mesesPgto} mês${cfg.taxa>0?' · taxa -'+brl(cfg.taxa):''}`;
+}
+
+function renderPrevisao(){
+  const list=document.getElementById('prev-list');
+  list.innerHTML='';
+  if(!hospitais.length){
+    list.innerHTML='<div class="empty-state">Nenhum hospital cadastrado</div>';
+    return;
+  }
+  hospitais.forEach((h,hi)=>{
+    const cfg=getRegrasHosp(h.id);
+    const ciclos=gerarCiclos(cfg);
+
+    const block=document.createElement('div');
+    block.className='prev-hosp-block';
+
+    // cabeçalho — clique no nome/dot colapsa, botão regras separado
+    const hdr=document.createElement('div'); hdr.className='prev-hosp-hdr';
+    hdr.innerHTML=`<div class="prev-hosp-dot" style="background:${h.cor}"></div>`
+      +`<span class="prev-hosp-nome">${h.nome}</span>`
+      +`<button class="prev-hosp-regras-btn" id="rh-btn-${h.id}" onclick="event.stopPropagation();toggleRegrasHosp('${h.id}')">&#9998; regras</button>`
+      +`<button class="prev-hosp-toggle" id="ph-tog-${h.id}" onclick="event.stopPropagation();toggleHospPrev('${h.id}')">−</button>`;
+    block.appendChild(hdr);
+
+    // painel de regras (inicialmente fechado)
+    const painel=document.createElement('div');
+    painel.className='prev-hosp-regras';
+    painel.id='rh-painel-'+h.id;
+    painel.innerHTML=`<div class="prev-hosp-regras-titulo">Ciclo de pagamento</div>`
+      +`<div class="field"><label>Início ciclo dia</label><input type="number" id="rh-ini-${h.id}" min="1" max="31" value="${cfg.inicio}"></div>`
+      +`<div class="field"><label>Fim ciclo dia</label><input type="number" id="rh-fim-${h.id}" min="1" max="31" value="${cfg.fim}"></div>`
+      +`<div class="field"><label>Pagamento dia</label><input type="number" id="rh-pgto-${h.id}" min="1" max="31" value="${cfg.pgto}"></div>`
+      +`<div class="field"><label>Meses após fim</label><input type="number" id="rh-mp-${h.id}" min="1" max="3" value="${cfg.mesesPgto}"></div>`
+      +`<div class="field"><label>Taxa operadora (R$)</label><input type="number" id="rh-taxa-${h.id}" min="0" step="0.01" placeholder="0,00" value="${cfg.taxa||''}"></div>`
+      +`<button onclick="salvarRegrasHosp('${h.id}')" style="width:100%;margin-top:8px;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-weight:600;box-shadow:0 4px 12px var(--accent-glow);">✓ Salvar regras</button>`
+      +`<div class="prev-resumo-regra" id="rh-res-${h.id}">${resumoRegra(cfg)}</div>`;
+    const hospBody=document.createElement('div');
+    hospBody.className='prev-hosp-body';
+    hospBody.id='ph-body-'+h.id;
+    hospBody.appendChild(painel);
+
+    // lista vertical de ciclos
+    const cicloList=document.createElement('div');
+    ciclos.forEach(c=>{
+      const totalBruto=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=c.inicio&&d<=c.fim;}).reduce((a,p)=>a+p.valor,0);
+      const desconto=totalBruto>0?(cfg.taxa||0):0;
+      const totalLiq=totalBruto-desconto;
+      const ir=calcIR(totalLiq, h.regime||'empresa', h.aliq||0);
+      const total=totalLiq;
+      const{status,badge,dias}=statusCiclo(c);
+      const item=document.createElement('div');item.className='prev-item';
+      item.style.marginBottom='4px';
+      const taxaLabel=desconto>0?`<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:1px;">taxa = -${brl(desconto)}</div>`:'';
+      const irLabel=ir>0?`<div style="font-family:var(--mono);font-size:9px;color:#f5a623;margin-top:1px;">IR = -${brl(ir)} → líq. ${brl(total-ir)}</div>`
+        :(h.regime==='empresa'?`<div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:1px;">IR gerenciado pela empresa</div>`:'');
+      item.innerHTML=`<div class="prev-hdr"><span class="prev-periodo">${fmtD(c.inicio)} – ${fmtD(c.fim)}</span><span class="prev-badge ${badge}">${status}</span></div>`
+        +`<div class="prev-body"><div><div class="prev-pgto">pagamento<br><strong>${fmtD(c.pagamento)}</strong></div><div class="prev-dias">${dias}</div></div>`
+        +`<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px"><div class="prev-val${status==='Parcial'?' parcial':''}">${brl(total)}</div>${taxaLabel}${irLabel}`
+        +`<button class="btn-pdf" data-ini="${c.inicio.getTime()}" data-fim="${c.fim.getTime()}" data-pgto="${fmtD(c.pagamento)}" data-hosp="${h.id}">&#128196; PDF</button></div></div>`;
+      cicloList.appendChild(item);
+    });
+    hospBody.appendChild(cicloList);
+    block.appendChild(hospBody);
+
+    // separador entre hospitais
+    if(hi<hospitais.length-1){
+      const sep=document.createElement('div');
+      sep.style.cssText='border-top:1px solid var(--border);margin:8px 0 10px;';
+      block.appendChild(sep);
+    }
+    list.appendChild(block);
+  });
+}
+
+// ═══════════════════════════════════════════════
+// SOMA INTERVALO
+// ═══════════════════════════════════════════════
+// ── MINI CALENDÁRIO DE INTERVALO ──
+let miniMes = new Date().getMonth();
+let miniAno = new Date().getFullYear();
+let miniIni = null; // Date
+let miniFim = null; // Date
+
+function miniNavMes(d){
+  miniMes += d;
+  if(miniMes > 11){ miniMes = 0; miniAno++; }
+  if(miniMes < 0){ miniMes = 11; miniAno--; }
+  renderMiniCal();
+}
+
+function miniClicarDia(dateStr){
+  const d = parseD(dateStr);
+  if(!miniIni || (miniIni && miniFim)){
+    // começa nova seleção
+    miniIni = d; miniFim = null;
+  } else {
+    // define fim (garante ordem)
+    if(d < miniIni){ miniFim = miniIni; miniIni = d; }
+    else { miniFim = d; }
+  }
+  // atualizar hidden inputs
+  document.getElementById('dt-ini').value = miniIni ? fmtD(miniIni) : '';
+  document.getElementById('dt-fim').value = miniFim ? fmtD(miniFim) : '';
+  // atualizar labels
+  const lblIni = document.getElementById('lbl-ini');
+  const lblFim = document.getElementById('lbl-fim');
+  lblIni.textContent = miniIni ? 'Início: '+fmtD(miniIni) : 'Início: —';
+  lblIni.className = 'mini-range-lbl'+(miniIni?' set':'');
+  lblFim.textContent = miniFim ? 'Fim: '+fmtD(miniFim) : 'Fim: —';
+  lblFim.className = 'mini-range-lbl'+(miniFim?' set':'');
+  // limpar resultado
+  document.getElementById('sum-result').style.display='none';
+  document.getElementById('sum-error').style.display='none';
+  renderMiniCal();
+}
+
+function renderMiniCal(){
+  const grid = document.getElementById('mini-cal-grid');
+  const label = document.getElementById('mini-mes-label');
+  if(!grid) return;
+  label.textContent = MESES[miniMes].slice(0,3)+' '+miniAno;
+  const todayStr = fmtD(new Date());
+  const primeiro = new Date(miniAno, miniMes, 1);
+  const startCol = (primeiro.getDay() + 6) % 7;
+  const diasNoMes = new Date(miniAno, miniMes+1, 0).getDate();
+  let html = '';
+  for(let i=0;i<startCol;i++) html += '<div class="mini-day empty"></div>';
+  for(let d=1;d<=diasNoMes;d++){
+    const dObj = new Date(miniAno, miniMes, d);
+    const ds = fmtD(dObj);
+    const temPlantao = plantoes.some(p=>p.data===ds);
+    let cls = 'mini-day';
+    if(ds===todayStr) cls += ' today';
+    if(miniIni && miniFim){
+      if(dObj.getTime()===miniIni.getTime()) cls += ' range-start';
+      else if(dObj.getTime()===miniFim.getTime()) cls += ' range-end';
+      else if(dObj>miniIni && dObj<miniFim) cls += ' in-range';
+    } else if(miniIni && dObj.getTime()===miniIni.getTime()){
+      cls += ' range-start range-end';
+    }
+    if(temPlantao) cls += ' has-plantao';
+    html += `<div class="${cls}" onclick="miniClicarDia('${ds}')">${d}</div>`;
+  }
+  grid.innerHTML = html;
+}
+
+function limparMiniCal(){
+  miniIni=null; miniFim=null;
+  document.getElementById('dt-ini').value='';
+  document.getElementById('dt-fim').value='';
+  document.getElementById('lbl-ini').textContent='Início: —';
+  document.getElementById('lbl-ini').className='mini-range-lbl';
+  document.getElementById('lbl-fim').textContent='Fim: —';
+  document.getElementById('lbl-fim').className='mini-range-lbl';
+  document.getElementById('sum-result').style.display='none';
+  document.getElementById('sum-error').style.display='none';
+  renderMiniCal();
+}
+
+function somarIntervalo(){
+  const res=document.getElementById('sum-result'),err=document.getElementById('sum-error');
+  res.style.display='none'; err.style.display='none';
+  if(!miniIni || !miniFim){ err.textContent='Selecione o intervalo no calendário.'; err.style.display='block'; return; }
+  const soma=plantoes.reduce((a,p)=>{const d=parseD(p.data);return d>=miniIni&&d<=miniFim?a+p.valor:a;},0);
+  const detalhes=hospitais.map(h=>{
+    const t=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=miniIni&&d<=miniFim;}).reduce((a,p)=>a+p.valor,0);
+    return t>0?`<div style="display:flex;align-items:center;gap:5px;margin-top:3px"><div style="width:7px;height:7px;border-radius:50%;background:${h.cor};flex-shrink:0"></div><span style="font-family:var(--mono);font-size:10px;color:var(--text2);flex:1">${h.nome}</span><span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${brl(t)}</span></div>`:null;
+  }).filter(Boolean);
+  res.innerHTML='<div style="font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent);margin-bottom:4px">'+brl(soma)+'</div>'
+    +(detalhes.length>0?'<div style="border-top:.5px solid var(--border);padding-top:4px">'+detalhes.join('')+'</div>':'');
+  res.style.display='block';
+}
+
+// ═══════════════════════════════════════════════
+// PDF
+// ═══════════════════════════════════════════════
+document.addEventListener('click',function(e){
+  const b=e.target.closest('.btn-pdf');
+  if(b) gerarPDF(b.dataset.ini,b.dataset.fim,b.dataset.pgto,b.dataset.hosp||null);
+});
+
+function gerarPDF(iniTs,fimTs,pgtoStr,hospId=null){
+  const inicio=new Date(+iniTs),fim=new Date(+fimTs);
+  const itens=plantoes.filter(p=>{const d=parseD(p.data);return d>=inicio&&d<=fim&&(!hospId||p.hospId===hospId);}).sort((a,b)=>parseD(a.data)-parseD(b.data));
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF({unit:'mm',format:'a4'});
+  const ml=20,cw=170;let y=20;
+  doc.setFillColor(245,244,240);doc.rect(0,0,210,40,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(14);doc.setTextColor(26,25,23);
+  doc.text('Shiftr — Relatório de Plantões',ml,y);y+=7;
+  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(107,105,96);
+  doc.text('Período: '+fmtD(inicio)+' – '+fmtD(fim),ml,y);y+=5;
+  doc.text('Data de pagamento: '+pgtoStr,ml,y);y+=5;
+  doc.text('Gerado em: '+fmtD(new Date()),ml,y);y+=12;
+  if(!itens.length){doc.text('Nenhum plantão neste período.',ml,y);doc.save('plantoes.pdf');return;}
+  // cabeçalho tabela — DATA | HOSPITAL | DIA | TURNO | HORÁRIO | VALOR
+  const cData=ml, cHosp=ml+26, cDia=ml+72, cTurno=ml+104, cHor=ml+126, cVal=ml+cw;
+  doc.setFillColor(240,239,233);doc.rect(ml,y-5,cw,8,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(107,105,96);
+  doc.text('DATA',cData,y);doc.text('HOSPITAL',cHosp,y);doc.text('DIA',cDia,y);doc.text('TURNO',cTurno,y);doc.text('HORÁRIO',cHor,y);doc.text('VALOR',cVal,y,{align:'right'});
+  y+=3;doc.setDrawColor(216,214,206);doc.setLineWidth(.3);doc.line(ml,y,ml+cw,y);y+=5;
+  doc.setFont('helvetica','normal');doc.setFontSize(9);
+  let total=0;
+  itens.forEach((p,idx)=>{
+    if(y>270){doc.addPage();y=20;}
+    if(idx%2===0){doc.setFillColor(250,250,248);doc.rect(ml,y-4,cw,7,'F');}
+    const h=getHosp(p.hospId);
+    const dObj=parseD(p.data);
+    const dia=isWE(dObj)?'Fim de semana':'Dia de semana';
+    const turno=p.turno==='Custom'?'Custom':p.turno;
+    const horario=p.turno==='Custom'
+      ? (p.hIni||'?')+'–'+(p.hFim||'?')
+      : p.turno==='Diurno' ? '07:00–19:00' : '19:00–07:00';
+    doc.setTextColor(26,25,23);
+    doc.text(p.data,cData,y);
+    doc.text((h?h.nome.slice(0,18):'?'),cHosp,y);
+    doc.text(dia,cDia,y);
+    doc.text(turno,cTurno,y);
+    doc.text(horario,cHor,y);
+    doc.text(brl(p.valor),cVal,y,{align:'right'});
+    total+=p.valor;y+=7;
+  });
+  y+=2;doc.setDrawColor(26,25,23);doc.setLineWidth(.5);doc.line(ml,y,ml+cw,y);y+=6;
+  doc.setFillColor(26,25,23);doc.rect(ml,y-5,cw,9,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(255,255,255);
+  doc.text('TOTAL',ml+2,y);doc.text(brl(total),cVal-2,y,{align:'right'});
+  doc.save('plantoes_'+fmtD(inicio).replace(/\//g,'-')+'_'+fmtD(fim).replace(/\//g,'-')+'.pdf');
+}
+
+// ═══════════════════════════════════════════════
+// CSV / BACKUP
+// ═══════════════════════════════════════════════
+function exportCSV(){
+  if(!plantoes.length){alert('Não há plantões.');return;}
+  const rows=plantoes.map(p=>{const h=getHosp(p.hospId);return`${p.data},${h?h.nome:'?'},${p.turno},${p.horas||12},${p.valor.toFixed(2)}`;});
+  const csv=['data,hospital,turno,horas,valor',...rows].join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='plantoes.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+function salvarJSON(){
+  if(!plantoes.length&&!hospitais.length){alert('Não há dados.');return;}
+  const dados={versao:2,exportado:new Date().toISOString(),hospitais,plantoes};
+  const blob=new Blob([JSON.stringify(dados,null,2)],{type:'application/json'});
+  const hoje=new Date();
+  const nome='plantoes_backup_'+hoje.getFullYear()+String(hoje.getMonth()+1).padStart(2,'0')+String(hoje.getDate()).padStart(2,'0')+'.json';
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=nome;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  showBackupMsg('Backup salvo!','ok');
+}
+function carregarJSON(event){
+  const file=event.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const d=JSON.parse(e.target.result);
+      if(d.versao===2&&d.hospitais&&d.plantoes){
+        if((plantoes.length||hospitais.length)&&!confirm('Substituir dados atuais?')){event.target.value='';return;}
+        hospitais=d.hospitais;plantoes=d.plantoes;
+      } else if(Array.isArray(d.plantoes||d)){
+        // compatibilidade v1
+        const lista=d.plantoes||d;
+        if(!confirm('Backup antigo detectado (sem hospitais). Importar só plantões?')){event.target.value='';return;}
+        plantoes=lista;
+      }
+      save();render();showBackupMsg(plantoes.length+' plantões carregados!','ok');
+    }catch(err){showBackupMsg('Erro: '+err.message,'err');}
+    event.target.value='';
+  };
+  reader.readAsText(file);
+}
+function showBackupMsg(msg,tipo){
+  const el=document.getElementById('backup-msg');el.textContent=msg;
+  el.style.color=tipo==='ok'?'var(--accent)':'#c0392b';
+  clearTimeout(el._t);el._t=setTimeout(()=>{el.textContent='';},4000);
+}
+function limparTudo(){
+  if(confirm('Remover todos os plantões? Os hospitais serão mantidos.')){plantoes=[];save();render();}
+}
+
+// ═══════════════════════════════════════════════
+// RENDER PRINCIPAL
+// ═══════════════════════════════════════════════
+function setPage(p){
+  ['cal','dash'].forEach(id=>{
+    document.getElementById('page-'+id).classList.toggle('active', id===p);
+    document.getElementById('nav-'+id).classList.toggle('active', id===p);
+  });
+  if(p==='dash'){
+    renderDashboard();
+    const mc=document.querySelector('.main-content');
+    if(mc) mc.scrollTop=0;
+  }
+  if(p==='cal'){
+    scrollParaMesAtual();
+  }
+}
+
+function renderDashboard(){
+  const el=document.getElementById('dash-content');
+  const label=document.getElementById('dash-label');
+  label.textContent='Dashboard — '+anoAtual;
+  if(!plantoes.length&&!hospitais.length){
+    el.innerHTML='<div style="font-family:var(--mono);font-size:12px;color:var(--text3);padding:40px;text-align:center">Nenhum dado disponível.<br>Adicione hospitais e plantões para ver o dashboard.</div>';
+    return;
+  }
+  const pAno=plantoes.filter(p=>parseD(p.data).getFullYear()===anoAtual);
+  const totalAno=pAno.reduce((a,p)=>a+p.valor,0);
+  const totalPlantoes=pAno.length;
+  const mediaM=totalAno/12;
+
+  // por hospital
+  const porHosp=hospitais.map(h=>{
+    const ps=pAno.filter(p=>p.hospId===h.id);
+    const horas=ps.reduce((a,p)=>a+(p.horas||12),0);
+    return{...h,total:ps.reduce((a,p)=>a+p.valor,0),qtd:ps.length,horas,
+      diurno:ps.filter(p=>p.turno!=='Noturno').reduce((a,p)=>a+p.valor,0),
+      noturno:ps.filter(p=>p.turno==='Noturno').reduce((a,p)=>a+p.valor,0)};
+  }).filter(h=>h.qtd>0).sort((a,b)=>b.total-a.total);
+  const totalHoras=porHosp.reduce((a,h)=>a+h.horas,0);
+
+  // por mês
+  const porMes=Array.from({length:12},(_,i)=>{
+    const ps=pAno.filter(p=>parseD(p.data).getMonth()===i);
+    const segs=hospitais.map(h=>({cor:h.cor,val:ps.filter(p=>p.hospId===h.id).reduce((a,p)=>a+p.valor,0)})).filter(s=>s.val>0);
+    return{mes:i,total:ps.reduce((a,p)=>a+p.valor,0),segs,qtd:ps.length};
+  });
+  const maxMes=Math.max(...porMes.map(m=>m.total),1);
+
+  // mês com mais ganho (por data de plantão)
+  const melhorMes=porMes.reduce((a,b)=>b.total>a.total?b:a,porMes[0]);
+
+  // previsão por mês de pagamento — calculado aqui para reuso
+  const porMesPgtoGlobal = Array.from({length:12}, ()=>({total:0,qtd:0}));
+  hospitais.forEach(h=>{
+    const cfg=getRegrasHosp(h.id);
+    const ciclos=gerarCiclos(cfg);
+    ciclos.forEach(c=>{
+      if(c.pagamento.getFullYear()!==anoAtual) return;
+      const mesIdx=c.pagamento.getMonth();
+      const ps=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=c.inicio&&d<=c.fim;});
+      const tot=ps.reduce((a,p)=>a+p.valor,0);
+      porMesPgtoGlobal[mesIdx].total+=tot;
+      porMesPgtoGlobal[mesIdx].qtd+=ps.length;
+    });
+  });
+  const melhorMesPgto=porMesPgtoGlobal.reduce((a,b,bi)=>b.total>a.total?{...b,mes:bi}:{...a},
+    {...porMesPgtoGlobal[0],mes:0});
+
+  // diurno vs noturno
+  const totDiurno=pAno.filter(p=>p.turno!=='Noturno').reduce((a,p)=>a+p.valor,0);
+  const totNoturno=pAno.filter(p=>p.turno==='Noturno').reduce((a,p)=>a+p.valor,0);
+  const pctNoturno=totalAno>0?Math.round(totNoturno/totalAno*100):0;
+  // semana vs FDS
+  const totSemana=pAno.filter(p=>!isWE(parseD(p.data))).reduce((a,p)=>a+p.valor,0);
+  const totFDS=pAno.filter(p=>isWE(parseD(p.data))).reduce((a,p)=>a+p.valor,0);
+
+  el.innerHTML=`
+  <!-- Meta anual -->
+  ${(()=>{
+    const meta=getMeta(anoAtual);
+    const metaAnual=meta.anual||0;
+    const mesAtualReal=new Date().getMonth();
+    const anoAtualReal=new Date().getFullYear();
+    // Total já recebido (meses passados) + previsto mês atual
+    const totalRecebido=anoAtual<anoAtualReal
+      ? porMesPgtoGlobal.reduce((a,m)=>a+m.total,0)
+      : porMesPgtoGlobal.slice(0,mesAtualReal+1).reduce((a,m)=>a+m.total,0);
+    // Total previsto incluindo meses futuros
+    const totalPrevisto=porMesPgtoGlobal.reduce((a,m)=>a+m.total,0);
+    const pct=metaAnual>0?Math.min(Math.round(totalRecebido/metaAnual*100),100):0;
+    const pctPrev=metaAnual>0?Math.min(Math.round(totalPrevisto/metaAnual*100),100):0;
+    const falta=metaAnual>0?Math.max(metaAnual-totalPrevisto,0):0;
+    const corPct=pct>=100?'var(--green)':pct>=70?'var(--accent2)':pct>=40?'var(--sun)':'var(--red)';
+    return`<div class="dash-card" style="margin-bottom:14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div class="dash-card-title" style="margin-bottom:0">🎯 Meta de recebimento — ${anoAtual}</div>
+        <button onclick="abrirModalMeta()" style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.06em;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text2);">⚙ Configurar</button>
+      </div>
+      ${metaAnual>0?`
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
+          <div>
+            <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:${corPct}">${pct}%</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px;">de ${brl(metaAnual)}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)">${brl(totalPrevisto)}</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">previsto receber</div>
+            ${falta>0?`<div style="font-family:var(--mono);font-size:10px;color:var(--sun);margin-top:2px;">faltam ${brl(falta)}</div>`:`<div style="font-family:var(--mono);font-size:10px;color:var(--green);margin-top:2px;">✓ Meta atingida!</div>`}
+          </div>
+        </div>
+        <div style="background:var(--surface2);border-radius:6px;height:10px;overflow:hidden;border:1px solid var(--border);position:relative;">
+          <!-- Camada previsto (amarelo claro) -->
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${pctPrev}%;background:rgba(245,166,35,.25);border-radius:6px;"></div>
+          <!-- Camada recebido (cor real) -->
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:linear-gradient(90deg,${corPct},${corPct}cc);border-radius:6px;transition:width .5s;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:8px;color:var(--text3);margin-top:4px;">
+          <span>🟡 Previsto: ${brl(totalPrevisto)}</span>
+          <span style="color:${corPct}">Recebido: ${brl(totalRecebido)}</span>
+        </div>
+        <!-- Metas mensais -->
+        <div style="margin-top:10px;display:grid;grid-template-columns:repeat(6,1fr);gap:4px;">
+          ${Array.from({length:12},(_,i)=>{
+            const mesAtual=new Date().getMonth();
+            const anoAtualReal=new Date().getFullYear();
+            const mm=getMetaMes(anoAtual,i);
+            const real=porMesPgtoGlobal[i].total;
+            const p=mm>0?Math.min(Math.round(real/mm*100),100):0;
+
+            // Classificar baseado em se o pagamento daquele mês já caiu
+            // "Passado" = mês cujo pagamento já aconteceu (antes de hoje)
+            // "Atual" = mês em andamento (hoje está dentro do ciclo ou pagamento é este mês)
+            // "Futuro" = pagamento ainda não ocorreu
+            const hoje=new Date(); hoje.setHours(0,0,0,0);
+            // Verificar data de pagamento real do ciclo deste mês/hospital
+            let dataPgtoMes = null;
+            hospitais.forEach(h=>{
+              const cfg=getRegrasHosp(h.id);
+              gerarCiclos(cfg).forEach(c=>{
+                if(c.pagamento.getFullYear()===anoAtual && c.pagamento.getMonth()===i){
+                  if(!dataPgtoMes || c.pagamento < dataPgtoMes) dataPgtoMes = c.pagamento;
+                }
+              });
+            });
+
+            // Se não tem ciclo nesse mês, usa lógica simples de calendário
+            const isPassadoReal = dataPgtoMes ? dataPgtoMes < hoje
+              : (anoAtual < anoAtualReal || (anoAtual===anoAtualReal && i < mesAtual));
+            const isAtualReal   = dataPgtoMes
+              ? (dataPgtoMes.getMonth()===mesAtual && dataPgtoMes.getFullYear()===anoAtualReal)
+              : (anoAtual===anoAtualReal && i===mesAtual);
+            const isFuturoReal  = !isPassadoReal;
+
+            const isFuturo  = isFuturoReal && !isAtualReal;
+            const isAtual   = isAtualReal;
+            const isPassado = isPassadoReal;
+
+            let corBarra, corLabel, label, bordaAtual='';
+            if(isPassado){
+              // Verde se atingiu ou superou a meta (incluindo meta=0)
+              // Vermelho apenas se meta > 0 e não foi atingida
+              const atingiu = mm===0 ? true : real>=mm;
+              corBarra = atingiu ? 'var(--green)' : 'var(--red)';
+              corLabel = atingiu ? 'var(--green)' : 'var(--red)';
+              label    = mm===0 ? '✓' : `${p}%`;
+            } else {
+              const atingeMeta = mm>0 ? real>=mm : false;
+              const isHoje = dataPgtoMes && Math.abs(dataPgtoMes-hoje)<(31*24*60*60*1000);
+              corBarra = mm>0 ? (atingeMeta?'var(--sun)':'var(--red)') : 'var(--border2)';
+              corLabel = '#fff';
+              label = mm>0 ? `${Math.min(p,100)}%` : '—';
+              if(isAtual) bordaAtual='border:1.5px solid var(--sun);';
+            }
+
+            return`<div style="text-align:center;cursor:pointer;" onclick="abrirModalMeta(${i})" title="${MESES[i]}: meta ${brl(mm)} · previsto ${brl(real)}">
+              <div style="font-family:var(--mono);font-size:7px;color:var(--text3);margin-bottom:2px;">${MESES[i].slice(0,3)}</div>
+              <div style="height:32px;background:${!isPassado&&mm>0?corBarra:(isPassado&&(p===0||p>=100)?corBarra:'var(--surface2)')};border-radius:4px;${bordaAtual}overflow:hidden;position:relative;">
+                ${!isPassado
+                  ? `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:${mm>0?'9':'7'}px;font-weight:700;color:${mm>0?'#fff':'var(--text3)'};text-shadow:${mm>0?'0 1px 3px rgba(0,0,0,.3)':'none'};">${label}</div>`
+                  : `<div style="position:absolute;bottom:0;left:0;right:0;height:${Math.max(p,p===0?100:p)}%;background:${corBarra};transition:height .5s;"></div>
+                     <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.4);">${label}</div>`
+                }
+              </div>
+              <div style="font-family:var(--mono);font-size:7px;color:${!isPassado&&mm>0?corBarra:corLabel};margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${!isPassado&&mm>0?'previsto':label}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      `:`<div style="font-family:var(--mono);font-size:11px;color:var(--text3);text-align:center;padding:16px 0;">
+          Nenhuma meta definida.<br>
+          <span style="color:var(--accent2);cursor:pointer;" onclick="abrirModalMeta()">Clique em Configurar para definir sua meta anual →</span>
+        </div>`}
+    </div>`;
+  })()}
+
+  <!-- KPIs -->
+  <div class="dash-grid">
+    <div class="dash-card">
+      <div class="dash-card-title">Resumo anual ${anoAtual}</div>
+      <div class="dash-big-val">${brl(totalAno)}</div>
+      <div class="dash-sub">${totalPlantoes} plantão${totalPlantoes!==1?'s':''}</div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:3px;">
+        ${porHosp.map(h=>`<div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;">
+          <div style="width:7px;height:7px;border-radius:50%;background:${h.cor};flex-shrink:0"></div>
+          <span style="flex:1;color:var(--text2)">${h.nome}</span>
+          <span style="color:var(--text);font-weight:500">${brl(h.total)}</span>
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-title">☀ Diurno vs ☽ Noturno</div>
+      <div style="display:flex;gap:12px;margin-bottom:8px;">
+        <div>
+          <div class="dash-big-val" style="font-size:20px">${100-pctNoturno}%</div>
+          <div class="dash-sub">☀ Diurno</div>
+        </div>
+        <div style="width:.5px;background:var(--border);flex-shrink:0"></div>
+        <div>
+          <div class="dash-big-val" style="font-size:20px">${pctNoturno}%</div>
+          <div class="dash-sub">☽ Noturno</div>
+        </div>
+      </div>
+      <div class="dash-bar-wrap">
+        <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px"><span>${brl(totDiurno)}</span><span>${brl(totNoturno)}</span></div>
+        <div class="dash-bar-bg" style="height:8px;border-radius:4px;overflow:hidden;display:flex;">
+          <div style="width:${100-pctNoturno}%;background:#e6c94a;border-radius:4px 0 0 4px;"></div>
+          <div style="width:${pctNoturno}%;background:var(--accent);border-radius:0 4px 4px 0;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-title">Semana vs Fim de semana</div>
+      <div style="display:flex;gap:12px;margin-bottom:8px;">
+        <div>
+          <div class="dash-big-val" style="font-size:20px">${totalAno>0?Math.round(totSemana/totalAno*100):0}%</div>
+          <div class="dash-sub">Semana</div>
+        </div>
+        <div style="width:.5px;background:var(--border);flex-shrink:0"></div>
+        <div>
+          <div class="dash-big-val" style="font-size:20px">${totalAno>0?Math.round(totFDS/totalAno*100):0}%</div>
+          <div class="dash-sub">Fim de semana</div>
+        </div>
+      </div>
+      <div class="dash-bar-wrap">
+        <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:3px"><span>${brl(totSemana)}</span><span>${brl(totFDS)}</span></div>
+        <div class="dash-bar-bg" style="height:8px;border-radius:4px;overflow:hidden;display:flex;">
+          <div style="width:${totalAno>0?Math.round(totSemana/totalAno*100):0}%;background:#4caf50;border-radius:4px 0 0 4px;"></div>
+          <div style="width:${totalAno>0?Math.round(totFDS/totalAno*100):0}%;background:#f1c40f;border-radius:0 4px 4px 0;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-title">Melhor mês (recebimento)</div>
+      <div class="dash-big-val">${melhorMesPgto.total>0?MESES[melhorMesPgto.mes].slice(0,3):'—'}</div>
+      <div class="dash-sub">${melhorMesPgto.total>0?brl(melhorMesPgto.total)+' · '+melhorMesPgto.qtd+' plantão'+(melhorMesPgto.qtd!==1?'s':''):'sem dados'}</div>
+    </div>
+  </div>
+
+  <!-- Gráfico mensal por data exata de pagamento -->
+  ${(()=>{
+    // agrupa por "YYYY/MM/DD" de pagamento → lista de {cor, nome, val}
+    const porData={};
+    hospitais.forEach(h=>{
+      const cfg=getRegrasHosp(h.id);
+      const ciclos=gerarCiclos(cfg);
+      ciclos.forEach(c=>{
+        if(c.pagamento.getFullYear()!==anoAtual) return;
+        const ps=plantoes.filter(p=>{
+          const d=parseD(p.data);
+          return p.hospId===h.id && d>=c.inicio && d<=c.fim;
+        });
+        const bruto=ps.reduce((a,p)=>a+p.valor,0);
+        if(bruto<=0) return;
+        const desconto=bruto>0?(cfg.taxa||0):0;
+        const total=bruto-desconto;
+        const key=fmtD(c.pagamento);
+        if(!porData[key]) porData[key]={pagamento:c.pagamento,itens:[]};
+        porData[key].itens.push({cor:h.cor,nome:h.nome,val:total});
+      });
+    });
+
+    // ordenar por data e agrupar por mês para o gráfico
+    // cada mês pode ter múltiplas datas → sub-barras lado a lado
+    const mesesMap=Array.from({length:12},()=>[]);
+    Object.values(porData).sort((a,b)=>a.pagamento-b.pagamento).forEach(d=>{
+      const mi=d.pagamento.getMonth();
+      const dia=d.pagamento.getDate();
+      const tot=d.itens.reduce((a,i)=>a+i.val,0);
+      mesesMap[mi].push({dia,tot,itens:d.itens,dataStr:fmtD(d.pagamento)});
+    });
+
+    const allTots=Object.values(porData).map(d=>d.itens.reduce((a,i)=>a+i.val,0));
+    const maxVal=Math.max(...allTots,1);
+    const totalPgto=allTots.reduce((a,v)=>a+v,0);
+
+    // Gráfico SVG — dimensões fixas, espaçamento dinâmico
+    const SVG_H=80;      // altura das barras
+    const LABEL_DIA=12;  // espaço para label do dia
+    const LABEL_MES=12;  // espaço para nome do mês
+    const LABEL_TOT=12;  // espaço para total do mês
+    const MARGIN_L=8, MARGIN_R=8;
+    const SVG_TOTAL_H=SVG_H+LABEL_DIA+LABEL_MES+LABEL_TOT+4;
+
+    // largura disponível — distribui igualmente entre os 12 meses
+    // cada mês recebe espaço proporcional ao número de datas
+    const totalSlots=mesesMap.reduce((a,d)=>a+Math.max(d.length,1),0);
+    const AVAILABLE=600; // largura interna fixa
+    const slotW=Math.floor((AVAILABLE-MARGIN_L-MARGIN_R)/totalSlots);
+    const BAR_W=Math.max(Math.floor(slotW*0.6),4);
+    const BAR_GAP=Math.max(Math.floor(slotW*0.15),1);
+    const GRP_PAD=Math.max(Math.floor(slotW*0.2),2);
+
+    let svgContent='';
+    let cx=MARGIN_L;
+    mesesMap.forEach((datas,mi)=>{
+      const grpStart=cx;
+      const numBars=Math.max(datas.length,1);
+      const grpW=numBars*slotW;
+
+      if(!datas.length){
+        // mês sem dados — traço mínimo
+        const bx=cx+slotW/2-BAR_W/2;
+        svgContent+=`<rect x="${bx}" y="${SVG_H-1}" width="${BAR_W}" height="1" fill="var(--border)" rx="1"/>`;
+        svgContent+=`<text x="${cx+slotW/2}" y="${SVG_H+LABEL_DIA+LABEL_MES}" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8" fill="var(--text3)">${MESES[mi].slice(0,3)}</text>`;
+        cx+=grpW;
+        return;
+      }
+
+      // sub-barras por data
+      datas.forEach((d,di)=>{
+        const bx=cx+di*slotW+slotW/2-BAR_W/2;
+        const barH=Math.max(Math.round((d.tot/maxVal)*SVG_H),4);
+        let stackY=SVG_H;
+        d.itens.forEach(it=>{
+          const sh=Math.max(Math.round((it.val/d.tot)*barH),2);
+          stackY-=sh;
+          const isTop=it===d.itens[0];
+          svgContent+=`<rect x="${bx}" y="${stackY}" width="${BAR_W}" height="${sh}" fill="${it.cor}" rx="${isTop?2:0}" ry="${isTop?2:0}"><title>${it.nome} · dia ${d.dia}: ${brl(it.val)}</title></rect>`;
+        });
+        // label dia
+        svgContent+=`<text x="${bx+BAR_W/2}" y="${SVG_H+LABEL_DIA}" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="7" fill="var(--text3)">${d.dia}</text>`;
+      });
+
+      // nome do mês centralizado no grupo
+      const mesX=cx+grpW/2;
+      const totMes=datas.reduce((a,d)=>a+d.tot,0);
+      svgContent+=`<text x="${mesX}" y="${SVG_H+LABEL_DIA+LABEL_MES}" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="8" font-weight="500" fill="var(--text)">${MESES[mi].slice(0,3)}</text>`;
+      if(datas.length>1){
+        // total do mês em linha separada, apenas para meses com múltiplas datas
+        svgContent+=`<text x="${mesX}" y="${SVG_H+LABEL_DIA+LABEL_MES+LABEL_TOT}" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="7" fill="var(--accent)">${brl(totMes)}</text>`;
+      }
+      cx+=grpW;
+    });
+
+    const finalW=cx+MARGIN_R;
+    const svgHtml=`<svg viewBox="0 0 ${finalW} ${SVG_TOTAL_H}" width="100%" style="display:block;">
+      <line x1="${MARGIN_L}" y1="${SVG_H}" x2="${finalW-MARGIN_R}" y2="${SVG_H}" stroke="var(--border)" stroke-width="0.5"/>
+      ${svgContent}
+    </svg>`;
+
+    const hospComPgto=[...new Set(Object.values(porData).flatMap(d=>d.itens.map(i=>i.cor+'|'+i.nome)))].map(s=>{const[cor,nome]=s.split('|');return{cor,nome};});
+
+    return `<div class="dash-card" style="margin-bottom:14px;">
+      <div class="dash-card-title">Previsão de recebimentos — ${anoAtual} (por data de pagamento)</div>
+      <div style="overflow-x:auto;padding-bottom:4px">${svgHtml}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;flex-wrap:wrap;gap:6px;">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${hospComPgto.map(h=>`<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)"><span style="width:8px;height:8px;border-radius:50%;background:${h.cor};display:inline-block"></span>${h.nome}</span>`).join('')}
+        </div>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:500;color:var(--accent)">Total previsto: ${brl(totalPgto)}</span>
+      </div>
+    </div>`;
+  })()}
+
+  <!-- Por hospital -->
+  <div class="dash-3col">
+    <div class="dash-card">
+      <div class="dash-card-title">Receita por hospital</div>
+      ${porHosp.length?porHosp.map(h=>{
+        const pct=totalAno>0?Math.round(h.total/totalAno*100):0;
+        return`<div class="dash-hosp-row">
+          <div class="dash-hosp-dot" style="background:${h.cor}"></div>
+          <div class="dash-hosp-nome">${h.nome}</div>
+          <div class="dash-hosp-val">${brl(h.total)}</div>
+          <div class="dash-hosp-pct">${pct}%</div>
+        </div>
+        <div class="dash-bar-bg" style="margin-bottom:6px"><div class="dash-bar-fill" style="width:${pct}%;background:${h.cor}"></div></div>`;
+      }).join(''):'<div class="dash-sub">Sem dados</div>'}
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-title">Horas trabalhadas por hospital</div>
+      ${porHosp.length?porHosp.map(h=>{
+        const pctH=totalHoras>0?Math.round(h.horas/totalHoras*100):0;
+        const hFmt=h.horas%1===0?h.horas.toFixed(0):h.horas.toFixed(1);
+        const vlrH=h.horas>0?(h.total/h.horas):0;
+        return`<div class="dash-hosp-row">
+          <div class="dash-hosp-dot" style="background:${h.cor}"></div>
+          <div class="dash-hosp-nome">${h.nome}</div>
+          <div class="dash-hosp-val">${hFmt}h</div>
+          <div class="dash-hosp-pct">${pctH}%</div>
+        </div>
+        <div class="dash-bar-bg" style="margin-bottom:2px"><div class="dash-bar-fill" style="width:${pctH}%;background:${h.cor}"></div></div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-bottom:6px;text-align:right">${brl(vlrH)}/h</div>`;
+      }).join(''):'<div class="dash-sub">Sem dados</div>'}
+      ${porHosp.length?`<div style="border-top:.5px solid var(--border);padding-top:6px;font-family:var(--mono);font-size:10px;color:var(--text2);display:flex;justify-content:space-between"><span>Total</span><span style="font-weight:500">${totalHoras%1===0?totalHoras.toFixed(0):totalHoras.toFixed(1)}h</span></div>`:''}
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-title">Plantões por hospital</div>
+      ${porHosp.length?porHosp.map(h=>{
+        const pctQ=totalPlantoes>0?Math.round(h.qtd/totalPlantoes*100):0;
+        return`<div class="dash-hosp-row">
+          <div class="dash-hosp-dot" style="background:${h.cor}"></div>
+          <div class="dash-hosp-nome">${h.nome}</div>
+          <div class="dash-hosp-val">${h.qtd} plantão${h.qtd!==1?'s':''}</div>
+          <div class="dash-hosp-pct">${pctQ}%</div>
+        </div>
+        <div class="dash-bar-bg" style="margin-bottom:6px"><div class="dash-bar-fill" style="width:${pctQ}%;background:${h.cor}"></div></div>`;
+      }).join(''):'<div class="dash-sub">Sem dados</div>'}
+    </div>
+  </div>
+
+  <!-- Tabela detalhada por mês — baseada em previsão de recebimento -->
+  ${(()=>{
+    // Monta mapa: por mês de pagamento, por hospital → {total, qtdPlantoes}
+    const pgtoMap = Array.from({length:12}, ()=>({}));
+    const pgtoTotal = Array(12).fill(0);
+    const pgtoQtd   = Array(12).fill(0);
+    const hospTotais = {};
+    hospitais.forEach(h=>{
+      hospTotais[h.id]=0;
+      const cfg=getRegrasHosp(h.id);
+      const ciclos=gerarCiclos(cfg);
+      ciclos.forEach(c=>{
+        if(c.pagamento.getFullYear()!==anoAtual) return;
+        const mi=c.pagamento.getMonth();
+        const ps=plantoes.filter(p=>{const d=parseD(p.data);return p.hospId===h.id&&d>=c.inicio&&d<=c.fim;});
+        const totalBruto=ps.reduce((a,p)=>a+p.valor,0);
+        const desconto=totalBruto>0?(cfg.taxa||0):0;
+        const tot=totalBruto-desconto;
+        const qtd=ps.length;
+        if(!pgtoMap[mi][h.id]) pgtoMap[mi][h.id]={total:0,qtd:0};
+        pgtoMap[mi][h.id].total+=tot;
+        pgtoMap[mi][h.id].qtd+=qtd;
+        pgtoTotal[mi]+=tot;
+        pgtoQtd[mi]+=qtd;
+        hospTotais[h.id]+=tot;
+      });
+    });
+    const grandTotal=pgtoTotal.reduce((a,v)=>a+v,0);
+    const grandQtd=pgtoQtd.reduce((a,v)=>a+v,0);
+
+    const hospCols=hospitais.filter(h=>Object.values(pgtoMap).some(m=>m[h.id]?.total>0));
+
+    const thead=`<tr>
+      <th>Mês</th>
+      <th style="text-align:center">Qtd</th>
+      ${hospCols.map(h=>`<th style="text-align:right"><span style="display:inline-flex;align-items:center;gap:4px;justify-content:flex-end"><span style="width:6px;height:6px;border-radius:50%;background:${h.cor};display:inline-block;flex-shrink:0"></span>${h.nome}</span></th>`).join('')}
+      <th style="text-align:right">Total</th>
+    </tr>`;
+
+    const rows=Array.from({length:12},(_,i)=>{
+      const tot=pgtoTotal[i];
+      const qtd=pgtoQtd[i];
+      const semDados=tot===0&&qtd===0;
+      return`<tr${semDados?' style="opacity:.35"':''}>
+        <td style="font-weight:500;color:var(--text)">${MESES[i].slice(0,3)}</td>
+        <td style="color:var(--text2);text-align:center">${qtd||'—'}</td>
+        ${hospCols.map(h=>{
+          const v=pgtoMap[i][h.id]?.total||0;
+          return`<td style="text-align:right;font-family:var(--mono);font-size:10px">${v>0?brl(v):'—'}</td>`;
+        }).join('')}
+        <td style="font-weight:600;color:var(--accent2);text-align:right;font-family:var(--mono);font-size:10px">${tot>0?brl(tot):'—'}</td>
+      </tr>`;
+    }).join('');
+
+    const tfoot=`<tr style="background:var(--surface2);border-top:1px solid var(--border)">
+      <td style="font-weight:600;color:var(--text)">Tot</td>
+      <td style="font-weight:600;text-align:center">${grandQtd}</td>
+      ${hospCols.map(h=>`<td style="font-weight:600;color:${h.cor};text-align:right;font-family:var(--mono);font-size:10px">${hospTotais[h.id]>0?brl(hospTotais[h.id]):'—'}</td>`).join('')}
+      <td style="font-weight:600;color:var(--accent2);text-align:right;font-family:var(--mono);font-size:10px">${brl(grandTotal)}</td>
+    </tr>`;
+
+    return`<div class="dash-card">
+      <div class="dash-card-title">Detalhe mensal — previsão de recebimento por hospital</div>
+      <table class="dash-table" style="width:100%;table-layout:fixed;">
+        <colgroup>
+          <col style="width:36px">
+          <col style="width:32px">
+          ${hospCols.map(()=>`<col>`).join('')}
+          <col>
+        </colgroup>
+        <thead>${thead}</thead>
+        <tbody>${rows}</tbody>
+        <tfoot>${tfoot}</tfoot>
+      </table>
+    </div>
+    <!-- Relatório anual IR -->
+    <div class="dash-card" style="margin-top:14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div class="dash-card-title" style="margin-bottom:2px">📊 Relatório anual de IR — ${anoAtual}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);">Para entrega ao contador ou conferência própria</div>
+        </div>
+        <button onclick="gerarRelatorioIRAnual()" style="font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:10px 16px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-weight:600;box-shadow:0 4px 12px var(--accent-glow);">⬇ Gerar PDF</button>
+      </div>
+    </div>`;
+  })()}`;
+}
+
+let _primeiroRender = true;
+function render(){
+  document.getElementById('ano-display').textContent=anoAtual;
+  document.getElementById('year-label').textContent='— '+anoAtual;
+  renderHospList();
+  renderMonths();
+  renderMetrics();
+  renderLista();
+  renderPrevisao();
+  renderMiniCal();
+  if(document.getElementById('page-dash').classList.contains('active')) renderDashboard();
+  if(_primeiroRender && anoAtual===new Date().getFullYear()){
+    _primeiroRender=false;
+    scrollParaMesAtual();
+  }
+}
+
+function scrollParaMesAtual(){
+  const mesAtual=new Date().getMonth();
+  if(anoAtual!==new Date().getFullYear()) return;
+  const tentativa=(n)=>{
+    const el=document.getElementById('month-card-'+mesAtual);
+    if(!el){
+      if(n>0) setTimeout(()=>tentativa(n-1), 300);
+      return;
+    }
+
+    // Detecta o container que de fato tem scroll
+    const mc=document.querySelector('.main-content');
+    const candidatos=[mc, document.scrollingElement, document.documentElement, document.body].filter(Boolean);
+
+    let aplicou=false;
+    candidatos.forEach(cont=>{
+      if(cont.scrollHeight > cont.clientHeight + 5){
+        // calcula offset do elemento relativo a esse container
+        let offsetTop=0;
+        let node=el;
+        while(node && node!==cont && node!==document.body){
+          offsetTop+=node.offsetTop||0;
+          node=node.offsetParent;
+        }
+        // fallback simples se o cálculo acima não bater com main-content direto
+        if(cont===mc){
+          cont.scrollTop=Math.max(0, el.offsetTop-70);
+        } else {
+          const rect=el.getBoundingClientRect();
+          const contRect=cont===document.documentElement||cont===document.body ? {top:0} : cont.getBoundingClientRect();
+          const target=cont.scrollTop + (rect.top - contRect.top) - 70;
+          cont.scrollTop=Math.max(0,target);
+        }
+        aplicou=true;
+      }
+    });
+
+    // Garantia extra: scrollIntoView como fallback final
+    if(!aplicou){
+      el.scrollIntoView({behavior:'auto',block:'start'});
+      // ajusta o offset do header sticky
+      window.scrollBy(0,-70);
+    }
+  };
+  setTimeout(()=>tentativa(10), 400);
+}
+
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
+
+const PK = 'plantoes_perfil_v1';
+let perfil = {nome:'', esp:'', email:'', senha:''};
+
+function iniciais(nome){
+  if(!nome) return '?';
+  const p=nome.trim().split(/\s+/);
+  if(p.length===1) return p[0].slice(0,2).toUpperCase();
+  return (p[0][0]+p[p.length-1][0]).toUpperCase();
+}
+function atualizarUIperfil(){
+  const av=document.getElementById('sb-avatar');
+  const avt=document.getElementById('tb-avatar');
+  const info=document.getElementById('sb-perfil-info');
+  const temFoto = _currentUser?.photoURL;
+
+  if(perfil.nome){
+    // Só usa iniciais se não tiver foto do Google
+    if(!temFoto){
+      if(av){ av.textContent=iniciais(perfil.nome); av.className='perfil-avatar'; }
+      if(avt){ avt.textContent=iniciais(perfil.nome); avt.className='perfil-avatar'; }
+    } else {
+      // Garante que a foto do Google está aplicada e o texto está vazio
+      if(av){ av.style.background=`url(${temFoto}) center/cover no-repeat`; av.textContent=''; av.className='perfil-avatar'; }
+      if(avt){ avt.style.background=`url(${temFoto}) center/cover no-repeat`; avt.textContent=''; avt.className='perfil-avatar'; }
+    }
+    if(av) av.style.backgroundSize='cover';
+    const nm=document.getElementById('sb-perfil-nome');
+    const esp=document.getElementById('sb-perfil-esp');
+    if(nm) nm.textContent=perfil.nome;
+    if(esp) esp.textContent=perfil.esp||'';
+    if(info) info.style.display='flex';
+  } else {
+    if(av){ av.innerHTML='&#128100;'; av.className='perfil-avatar sem-perfil'; av.style.background=''; }
+    if(avt){ avt.innerHTML='&#128100;'; avt.className='perfil-avatar sem-perfil'; avt.style.background=''; }
+    if(info) info.style.display='none';
+  }
+}
+
+function loadPerfil(){ perfil = {nome:'', esp:'', email:'', senha:''}; }
+function savePerfil(){ saveFS(); }
+
+function atualizarAvatarPreview(){
+  const nome=document.getElementById('pf-nome')?.value?.trim()||'';
+  const prev=document.getElementById('mp-avatar-preview');
+  if(!prev) return;
+  if(_currentUser?.photoURL){
+    prev.style.background=`url(${_currentUser.photoURL}) center/cover no-repeat`;
+    prev.textContent='';
+  } else {
+    prev.style.background='linear-gradient(135deg,var(--accent),var(--accent2))';
+    prev.textContent = nome ? iniciais(nome) : (perfil.nome ? iniciais(perfil.nome) : '?');
+  }
+}
+function abrirModalPerfil(){
+  document.getElementById('pf-nome').value=perfil.nome||'';
+  document.getElementById('pf-esp').value=perfil.esp||'';
+  document.getElementById('pf-email').value=_currentUser?.email||perfil.email||'';
+  document.getElementById('pf-erro').style.display='none';
+  atualizarAvatarPreview();
+  document.getElementById('modal-perfil').classList.add('open');
+}
+function fecharModalPerfil(){document.getElementById('modal-perfil').classList.remove('open');}
+function salvarPerfil(){
+  const nome=document.getElementById('pf-nome').value.trim();
+  const esp=document.getElementById('pf-esp').value.trim();
+  const email=_currentUser?.email||perfil.email||'';
+  const erro=document.getElementById('pf-erro');
+  erro.style.display='none';
+  if(!nome){erro.textContent='Informe seu nome.';erro.style.display='block';return;}
+  perfil={nome,esp,email};
+  savePerfil();
+  atualizarUIperfil();
+  fecharModalPerfil();
+}
+
+// ═══════════════════════════════════════════════
+// INICIALIZAÇÃO
+// ═══════════════════════════════════════════════
+load();
+carregarRegras();
+loadTema();
+loadPerfil();
+atualizarUIperfil();
+initAuth();
+
+// Expor funções chamadas via onclick no HTML
+window.loginGoogle         = loginGoogle;
+window.logout              = logout;
+window.instalarPWA         = instalarPWA;
+window.aplicarUpdate       = aplicarUpdate;
+window.navAno              = navAno;
+window.setPage             = setPage;
+window.abrirMenu           = abrirMenu;
+window.fecharMenu          = fecharMenu;
+window.toggleDark          = toggleDark;
+window.abrirModalPerfil    = abrirModalPerfil;
+window.fecharModalPerfil   = fecharModalPerfil;
+window.salvarPerfil        = salvarPerfil;
+window.atualizarAvatarPreview = atualizarAvatarPreview;
+window.abrirModalHosp      = abrirModalHosp;
+window.fecharModalHosp     = fecharModalHosp;
+window.salvarHosp          = salvarHosp;
+window.deletarHosp         = deletarHosp;
+window.selecionarHosp      = selecionarHosp;
+window.selecionarHospModal = selecionarHospModal;
+window.validarCorHosp      = validarCorHosp;
+window.abrirModalDoc     = abrirModalDoc;
+window.fecharModalDoc    = fecharModalDoc;
+window.salvarDoc         = salvarDoc;
+window.excluirDoc        = excluirDoc;
+window.fecharAlertas     = fecharAlertas;
+window.handleDocFile     = handleDocFile;
+window.removerArquivoDoc = removerArquivoDoc;
+window.verDocumento      = verDocumento;
+window.baixarDocumento   = baixarDocumento;
+window.toggleRegimeIR       = toggleRegimeIR;
+window.abrirModalMeta        = abrirModalMeta;
+window.fecharModalMeta       = fecharModalMeta;
+window.confirmarMeta         = confirmarMeta;
+window.recalcMetaAnual       = recalcMetaAnual;
+window.metaAnualChanged      = metaAnualChanged;
+window.gerarRelatorioIRAnual = gerarRelatorioIRAnual;
+window.salvarMeta            = salvarMeta;
+window.dividirHorarios       = dividirHorarios;
+window.limparDivisao         = limparDivisao;
+window.compartilharDivisao   = compartilharDivisao;
+window.abrirModalPlantao   = abrirModalPlantao;
+window.fecharModalPlantao  = fecharModalPlantao;
+window.confirmarPlantao    = confirmarPlantao;
+window.removerPlantaoId    = removerPlantaoId;
+window.setTurnoModal       = setTurnoModal;
+window.togglePlantaoFixo   = togglePlantaoFixo;
+window.toggleDiaSemanaFixo = toggleDiaSemanaFixo;
+window.setTipoFixo         = setTipoFixo;
+window.toggleOcorrenciaMensal = toggleOcorrenciaMensal;
+window.setDiaSemanaMensal  = setDiaSemanaMensal;
+window.atualizarValPreview = atualizarValPreview;
+window.atualizarPreviewFixo = atualizarPreviewFixo;
+window.toggleSec           = toggleSec;
+window.toggleRegrasHosp    = toggleRegrasHosp;
+window.salvarRegrasHosp    = salvarRegrasHosp;
+window.toggleHospPrev      = toggleHospPrev;
+window.miniNavMes          = miniNavMes;
+window.miniClicarDia       = miniClicarDia;
+window.limparMiniCal       = limparMiniCal;
+window.somarIntervalo      = somarIntervalo;
+window.gerarPDF            = gerarPDF;
+
+</script>
+</body>
+</html>
