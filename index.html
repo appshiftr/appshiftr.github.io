@@ -1055,6 +1055,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     <div class="modal-field"><label>Especialidade</label><input type="text" id="pf-esp" placeholder="Cardiologia"></div>
     <div class="modal-field"><label>E-mail</label><input type="email" id="pf-email" placeholder="joao@email.com" readonly style="opacity:.5;cursor:default;"></div>
     <div id="pf-erro" style="font-family:var(--mono);font-size:10px;color:#c0392b;margin-top:-4px;margin-bottom:8px;display:none;"></div>
+    <button class="btn-secondary" onclick="exportarMeusDados()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;margin-bottom:8px;">
+      <span>&#8595;</span> Exportar meus dados (backup)
+    </button>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="fecharModalPerfil()">Cancelar</button>
       <button class="btn-primary" onclick="salvarPerfil()">Salvar</button>
@@ -1276,6 +1279,33 @@ function logout(){
   window._fb.signOut(window._fb.auth);
 }
 
+// Exporta todos os dados do usuário (plantões, hospitais, regras, perfil, metas e documentos)
+// em um arquivo JSON, como backup local de segurança — independente do Firestore.
+function exportarMeusDados(){
+  try{
+    const backup = {
+      _origem: 'Shiftr — backup de dados do usuário',
+      _geradoEm: new Date().toISOString(),
+      plantoes, hospitais, regras, perfil, metas, documentos
+    };
+    const json = JSON.stringify(backup, null, 2);
+    const blob = new Blob([json], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dataStr = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `shiftr-backup-${dataStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showSyncBar('Backup exportado ✓');
+  }catch(e){
+    console.error('Erro ao exportar backup:', e);
+    alert('Não foi possível gerar o backup. Tente novamente.');
+  }
+}
+
 let _unsubSnapshot = null; // listener em tempo real
 let _ignorarProximoSnapshot = false; // evita loop ao salvar
 let _docsJaCarregados = false; // evita reler a subcoleção de documentos a cada snapshot
@@ -1324,12 +1354,13 @@ async function _salvarFirestore(uid){
   showSyncBar('Salvando...', false);
   _ignorarProximoSnapshot = true;
   try{
-    // Dados principais — documentos ficam na subcoleção separada
+    // merge:true — atualiza só os campos enviados, sem risco de zerar
+    // o documento inteiro caso algum campo esteja vazio por bug/corrida de carregamento
     await setDoc(doc(db,'usuarios',uid),{
       plantoes, hospitais, regras, perfil, metas,
       tema: localStorage.getItem(DK)||'dark',
       updatedAt: new Date().toISOString()
-    });
+    }, {merge:true});
     showSyncBar('Salvo ✓');
   }catch(e){
     _ignorarProximoSnapshot = false;
@@ -3932,6 +3963,7 @@ initAuth();
 // Expor funções chamadas via onclick no HTML
 window.loginGoogle         = loginGoogle;
 window.logout              = logout;
+window.exportarMeusDados   = exportarMeusDados;
 window.instalarPWA         = instalarPWA;
 window.aplicarUpdate       = aplicarUpdate;
 window.navAno              = navAno;
