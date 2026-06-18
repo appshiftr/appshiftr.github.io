@@ -1490,8 +1490,10 @@ function calcValor(hosp, turno, hIni, hFim, dateStr){
   let h = 12;
   if(turno === 'Custom' && hIni && hFim) h = horasEntreHorarios(hIni, hFim);
   if(Math.abs(h-12) < 0.01) return val12;
-  // valor/hora
-  const valH = isDiurno ? (hosp.hd || val12/12) : (hosp.hn || val12/12);
+  // valor/hora — sempre a partir do val12 já correto para semana/FDS.
+  // (hosp.hd e hosp.hn são apenas um preview salvo no cadastro do hospital,
+  // calculados só a partir do valor de SEMANA — usá-los aqui ignorava o FDS.)
+  const valH = val12/12;
   return h * valH;
 }
 function getHosp(id){ return hospitais.find(h=>h.id===id)||null; }
