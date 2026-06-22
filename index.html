@@ -2156,13 +2156,24 @@ function gerarDatasFixo(){
 // MODAL META
 // ═══════════════════════════════════════════════
 function abrirModalMeta(mes=null){
+  // Usa metas[anoAtual] diretamente (sem o fallback de getMeta) para saber
+  // se o usuário já salvou uma meta para este ano alguma vez. Isso evita
+  // que o array padrão {meses:[0,0,...]} do getMeta seja confundido com
+  // "12 meses editados manualmente com valor 0", o que travava o cálculo
+  // anual<->mensal em ambas as direções.
+  const metaSalva = metas[anoAtual];
+  // Retrocompatibilidade: metas salvas antes desta correção não têm a flag
+  // _configurado, então também consideramos "configurada" se já existir
+  // soma > 0 nos meses (indício de que o usuário already preencheu antes).
+  const somaMesesSalvos = metaSalva?.meses?.reduce((a,v)=>a+(v||0),0) || 0;
+  const jaConfigurada = !!(metaSalva && (metaSalva._configurado || somaMesesSalvos>0));
   const meta=getMeta(anoAtual);
   document.getElementById('meta-anual').value=meta.anual||'';
   const grid=document.getElementById('meta-meses-grid');
-  const temMeses=meta.meses && meta.meses.length===12;
   grid.innerHTML=Array.from({length:12},(_,i)=>{
-    // Mostra o valor salvo (incluindo 0), campo vazio se não há meses salvos
-    const val=temMeses ? meta.meses[i] : '';
+    // Só mostra o value salvo se a meta já foi configurada de fato.
+    // Caso contrário, todos os campos começam vazios (mesmo que meta.meses exista como padrão).
+    const val=jaConfigurada ? meta.meses[i] : '';
     const placeholder=meta.anual>0?Math.round(meta.anual/12):'';
     return`<div class="modal-field" style="margin:0;">
       <label style="font-size:9px;">${MESES[i]}</label>
@@ -2792,7 +2803,7 @@ function getMetaMes(ano,mes){
   return m.anual>0 ? Math.round(m.anual/12) : 0;
 }
 function salvarMeta(ano,anual,mesesArr){
-  metas[ano]={anual:anual||0, meses:mesesArr||Array(12).fill(0)};
+  metas[ano]={anual:anual||0, meses:mesesArr||Array(12).fill(0), _configurado:true};
   saveFS();
   renderDashboard();
 }
