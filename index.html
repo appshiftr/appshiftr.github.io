@@ -2507,7 +2507,7 @@ function statusDoc(doc){
   if(!doc.validade) return {cls:'ok',label:'Sem vencimento'};
   const dias = diasParaVencer(doc.validade);
   if(dias<0)   return {cls:'vencido',label:`Vencido há ${Math.abs(dias)}d`};
-  if(dias<=30) return {cls:'alerta', label:`Vence em ${dias}d`};
+  if(dias<=60) return {cls:'alerta', label:`Vence em ${dias}d`};
   return {cls:'ok', label:`Válido por ${dias}d`};
 }
 
@@ -2684,7 +2684,7 @@ function verificarAlertas(){
   const alertas=[];
   const hoje=new Date(); hoje.setHours(0,0,0,0);
 
-  // 1. Documentos vencidos ou vencendo em 30 dias
+  // 1. Documentos vencidos ou vencendo em 60 dias
   documentos.forEach(doc=>{
     if(!doc.validade) return;
     const dias=diasParaVencer(doc.validade);
@@ -2692,7 +2692,7 @@ function verificarAlertas(){
       alertas.push({tipo:'critico',emoji:'🚨',
         titulo:`${doc.nome} — VENCIDO`,
         sub:`Venceu há ${Math.abs(dias)} dias. Renove imediatamente.`});
-    } else if(dias<=30){
+    } else if(dias<=60){
       alertas.push({tipo:'aviso',emoji:'⚠️',
         titulo:`${doc.nome} — vence em ${dias} dia${dias===1?'':'s'}`,
         sub:`Validade: ${new Date(doc.validade+'T00:00:00').toLocaleDateString('pt-BR')}${doc.inst?' · '+doc.inst:''}`});
