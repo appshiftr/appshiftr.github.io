@@ -1058,6 +1058,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     <button class="btn-secondary" onclick="exportarMeusDados()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;margin-bottom:8px;">
       <span>&#8595;</span> Exportar meus dados (backup)
     </button>
+    <button class="btn-secondary" onclick="exportarDatasPlantoesCSV()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;margin-bottom:8px;">
+      <span>&#128197;</span> Exportar datas de plantão (CSV)
+    </button>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="fecharModalPerfil()">Cancelar</button>
       <button class="btn-primary" onclick="salvarPerfil()">Salvar</button>
@@ -1303,6 +1306,38 @@ function exportarMeusDados(){
   }catch(e){
     console.error('Erro ao exportar backup:', e);
     alert('Não foi possível gerar o backup. Tente novamente.');
+  }
+}
+
+// Exporta só as DATAS dos plantões (sem hospital, valor ou qualquer outro dado),
+// em CSV de uma coluna, no formato AAAA-MM-DD — para importar no app de exames de
+// piscina (PiscinaVertVille), cruzando disponibilidade com os dias de plantão.
+function exportarDatasPlantoesCSV(){
+  try{
+    if(!plantoes.length){
+      alert('Não há plantões cadastrados para exportar.');
+      return;
+    }
+    // datas únicas, convertidas de DD/MM/AAAA para AAAA-MM-DD, ordenadas
+    const datasISO = [...new Set(plantoes.map(p=>{
+      const [d,m,a] = p.data.split('/');
+      return `${a}-${m}-${d}`;
+    }))].sort();
+    const csv = 'data\n' + datasISO.join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dataStr = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `shiftr-plantoes-datas-${dataStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showSyncBar('Datas exportadas ✓');
+  }catch(e){
+    console.error('Erro ao exportar datas dos plantões:', e);
+    alert('Não foi possível gerar o arquivo. Tente novamente.');
   }
 }
 
@@ -1854,16 +1889,34 @@ function intervalosColidem(a, b){
 }
 
 function temConflito(dateStr, turno, hIni, hFim, hospId){
-  const existentes = plantoes.filter(p => p.data === dateStr);
-  if(!existentes.length) return null;
-  const novoIntervalos = intervaloPlantao(turno, hIni, hFim);
-  for(const p of existentes){
-    const pIntervalos = intervaloPlantao(p.turno, p.hIni||'07:00', p.hFim||'19:00');
+  // Considera plantões do dia anterior, do próprio dia e do dia seguinte,
+  // pois um plantão pode cruzar a meia-noite e colidir com um plantão
+  // que começa no dia seguinte (ex.: 23:00–08:00 vs. 07:00 do dia seguinte).
+  const dRef = parseD(dateStr);
+  const dAnterior = new Date(dRef); dAnterior.setDate(dAnterior.getDate()-1);
+  const dPosterior = new Date(dRef); dPosterior.setDate(dPosterior.getDate()+1);
+  const dsAnterior = fmtD(dAnterior);
+  const dsPosterior = fmtD(dPosterior);
+
+  const candidatos = plantoes.filter(p =>
+    p.data === dateStr || p.data === dsAnterior || p.data === dsPosterior
+  );
+  if(!candidatos.length) return null;
+
+  // Intervalos do novo plantão, em minutos absolutos a partir da meia-noite do dia de referência (offset 0)
+  const novoIntervalos = intervaloPlantao(turno, hIni, hFim).map(([i,f]) => [i, f]);
+
+  for(const p of candidatos){
+    // offset: quantos dias o plantão existente está antes/depois do dia de referência
+    const offsetDias = Math.round((parseD(p.data) - dRef) / 86400000);
+    const offsetMin = offsetDias * 1440;
+    const pIntervalos = intervaloPlantao(p.turno, p.hIni||'07:00', p.hFim||'19:00')
+      .map(([i,f]) => [i+offsetMin, f+offsetMin]);
     for(const ni of novoIntervalos){
       for(const pi of pIntervalos){
         if(intervalosColidem(ni, pi)){
           const h = getHosp(p.hospId);
-          return `Conflito com plantão existente (${p.turno === 'Custom' ? p.hIni+'–'+p.hFim : p.turno}${h?' · '+h.nome:''})`;
+          return `Conflito com plantão existente em ${p.data} (${p.turno === 'Custom' ? p.hIni+'–'+p.hFim : p.turno}${h?' · '+h.nome:''})`;
         }
       }
     }
@@ -2860,11 +2913,11 @@ function buildMonthCard(mes,ano){
       function corGrupo(grupo){
         if(grupo.length===1){
           const c=getHosp(grupo[0].hospId)?.cor||'#aaa';
-          return hexComAlpha(c, 0.72);
+          return hexComAlpha(c, 0.45);
         }
         const stops=grupo.map((p,i)=>{
           const c=getHosp(p.hospId)?.cor||'#aaa';
-          const ca=hexComAlpha(c, 0.72);
+          const ca=hexComAlpha(c, 0.45);
           const a=Math.round(i/grupo.length*100), b=Math.round((i+1)/grupo.length*100);
           return `${ca} ${a}%,${ca} ${b}%`;
         });
@@ -3966,6 +4019,7 @@ initAuth();
 window.loginGoogle         = loginGoogle;
 window.logout              = logout;
 window.exportarMeusDados   = exportarMeusDados;
+window.exportarDatasPlantoesCSV = exportarDatasPlantoesCSV;
 window.instalarPWA         = instalarPWA;
 window.aplicarUpdate       = aplicarUpdate;
 window.navAno              = navAno;
