@@ -2156,30 +2156,19 @@ function gerarDatasFixo(){
 // MODAL META
 // ═══════════════════════════════════════════════
 function abrirModalMeta(mes=null){
-  // Usa metas[anoAtual] diretamente (sem o fallback de getMeta) para saber
-  // se o usuário já salvou uma meta para este ano alguma vez. Isso evita
-  // que o array padrão {meses:[0,0,...]} do getMeta seja confundido com
-  // "12 meses editados manualmente com valor 0", o que travava o cálculo
-  // anual<->mensal em ambas as direções.
-  const metaSalva = metas[anoAtual];
-  // Retrocompatibilidade: metas salvas antes desta correção não têm a flag
-  // _configurado, então também consideramos "configurada" se já existir
-  // soma > 0 nos meses (indício de que o usuário already preencheu antes).
-  const somaMesesSalvos = metaSalva?.meses?.reduce((a,v)=>a+(v||0),0) || 0;
-  const jaConfigurada = !!(metaSalva && (metaSalva._configurado || somaMesesSalvos>0));
   const meta=getMeta(anoAtual);
   document.getElementById('meta-anual').value=meta.anual||'';
   const grid=document.getElementById('meta-meses-grid');
+  // Sempre mostra os 12 meses com o valor salvo (incluindo zeros explícitos).
+  // Não há mais ambiguidade entre "editado" e "não editado": os meses
+  // refletem fielmente o que está salvo, e qualquer edição do campo anual
+  // redistribui tudo de novo (ver metaAnualChanged).
   grid.innerHTML=Array.from({length:12},(_,i)=>{
-    // Só mostra o value salvo se a meta já foi configurada de fato.
-    // Caso contrário, todos os campos começam vazios (mesmo que meta.meses exista como padrão).
-    const val=jaConfigurada ? meta.meses[i] : '';
-    const placeholder=meta.anual>0?Math.round(meta.anual/12):'';
+    const val=meta.meses && meta.meses.length===12 ? meta.meses[i] : 0;
     return`<div class="modal-field" style="margin:0;">
       <label style="font-size:9px;">${MESES[i]}</label>
       <input type="number" id="meta-mes-${i}" min="0" step="500"
-        placeholder="${placeholder}"
-        value="${val!==''&&val!==undefined?val:''}"
+        value="${val||0}"
         oninput="recalcMetaAnual()">
     </div>`;
   }).join('');
@@ -2187,72 +2176,34 @@ function abrirModalMeta(mes=null){
   if(mes!==null) setTimeout(()=>document.getElementById('meta-mes-'+mes)?.focus(),200);
 }
 
+// Editar um MÊS individual: o anual passa a ser a soma real dos 12 meses.
 function recalcMetaAnual(){
-  // Soma todos os meses: usa o valor digitado quando existe,
-  // e o valor implícito (placeholder, já dividido) quando o mês não foi editado.
-  // Isso garante que zerar/alterar um mês sempre reflita no total anual,
-  // mesmo que os outros meses nunca tenham sido tocados manualmente.
   let soma=0;
   for(let i=0;i<12;i++){
     const inp=document.getElementById('meta-mes-'+i);
     if(!inp) continue;
-    if(inp.value!==''){
-      soma+=parseFloat(inp.value)||0;
-    } else {
-      soma+=parseFloat(inp.placeholder)||0;
-    }
+    soma+=parseFloat(inp.value)||0;
   }
   document.getElementById('meta-anual').value=soma;
 }
 
+// Editar o ANUAL diretamente: sempre redistribui igualmente entre os 12 meses,
+// sobrescrevendo qualquer valor anterior (comportamento simples e previsível).
 function metaAnualChanged(){
-  // Quando o anual é digitado manualmente, distribui o RESTANTE
-  // (anual - soma dos meses já editados) entre os meses ainda não editados.
-  // Meses já editados (incluindo zerados) não são sobrescritos.
   const anual=parseFloat(document.getElementById('meta-anual').value)||0;
-  let somaEditados=0, qtdNaoEditados=0;
+  const porMes=Math.round(anual/12);
   for(let i=0;i<12;i++){
     const inp=document.getElementById('meta-mes-'+i);
-    if(!inp) continue;
-    if(inp.value!=='') somaEditados+=parseFloat(inp.value)||0;
-    else qtdNaoEditados++;
-  }
-  const restante=Math.max(anual-somaEditados,0);
-  const porMes=qtdNaoEditados>0?Math.round(restante/qtdNaoEditados):0;
-  for(let i=0;i<12;i++){
-    const inp=document.getElementById('meta-mes-'+i);
-    if(inp&&inp.value==='') inp.placeholder=porMes;
+    if(inp) inp.value=porMes;
   }
 }
 function fecharModalMeta(){ document.getElementById('modal-meta').classList.remove('open'); }
 function confirmarMeta(){
-  // Lê todos os campos — campos vazios ficam como null (não editados)
-  // campos com valor (incluindo 0 explícito) ficam com o valor
-  const inputs=Array.from({length:12},(_,i)=>document.getElementById('meta-mes-'+i));
-  const mesesArr=inputs.map(inp=>{
-    if(!inp) return null;
-    const raw=inp.value;
-    if(raw===''||raw===null) return null; // não editado
-    return parseFloat(raw)||0; // editado — preserva zero explícito
+  const mesesFinal=Array.from({length:12},(_,i)=>{
+    const inp=document.getElementById('meta-mes-'+i);
+    return parseFloat(inp?.value)||0;
   });
-
-  const somaEditados=mesesArr.reduce((a,v)=>a+(v!==null?v:0),0);
-  const temEditados=mesesArr.some(v=>v!==null);
-  let anual=parseFloat(document.getElementById('meta-anual').value)||0;
-
-  let mesesFinal;
-  if(!temEditados){
-    // nenhum mês editado — distribui igualmente
-    const pm=Math.round(anual/12);
-    mesesFinal=Array(12).fill(pm);
-  } else {
-    // tem meses editados — preenche não-editados com o valor restante distribuído
-    const qtdNaoEditados=mesesArr.filter(v=>v===null).length;
-    const restante=anual-somaEditados;
-    const pmRestante=qtdNaoEditados>0?Math.round(restante/qtdNaoEditados):0;
-    mesesFinal=mesesArr.map(v=>v!==null?v:pmRestante);
-    anual=mesesFinal.reduce((a,v)=>a+v,0);
-  }
+  const anual=mesesFinal.reduce((a,v)=>a+v,0);
 
   salvarMeta(anoAtual,anual,mesesFinal);
   fecharModalMeta();
@@ -3446,6 +3397,7 @@ function renderDashboard(){
   ${(()=>{
     const meta=getMeta(anoAtual);
     const metaAnual=meta.anual||0;
+    const metaConfigurada=!!(metas[anoAtual]&&metas[anoAtual]._configurado);
     const mesAtualReal=new Date().getMonth();
     const anoAtualReal=new Date().getFullYear();
     // Total já recebido (meses passados) + previsto mês atual
@@ -3463,7 +3415,7 @@ function renderDashboard(){
         <div class="dash-card-title" style="margin-bottom:0">🎯 Meta de recebimento — ${anoAtual}</div>
         <button onclick="abrirModalMeta()" style="font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.06em;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text2);">⚙ Configurar</button>
       </div>
-      ${metaAnual>0?`
+      ${metaConfigurada?`
         <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
           <div>
             <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:${corPct}">${pct}%</div>
