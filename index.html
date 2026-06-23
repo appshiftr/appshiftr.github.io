@@ -4320,31 +4320,10 @@ let analisaModel = null;
 let analisaImagemAtual = null;
 let analisaResultadosAtual = [];
 
-// Aguardar TensorFlow Hub estar disponível
-async function analisaEsperarHub() {
-  let tentativas = 0;
-  while (!window.hub && tentativas < 50) {
-    await new Promise(r => setTimeout(r, 100));
-    tentativas++;
-  }
-  if (!window.hub) {
-    throw new Error('TensorFlow Hub não carregou');
-  }
-}
-
-// Carregar modelo ao iniciar
+// Análise simulada com padrões realistas
 async function analisaCarregarModelo() {
-  try {
-    if (!analisaModel) {
-      console.log('Carregando modelo TensorFlow...');
-      await analisaEsperarHub();
-      analisaModel = await hub.load('https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v2_100_224/classification/3');
-      console.log('✓ Modelo carregado com sucesso');
-    }
-  } catch (e) {
-    console.error('Erro ao carregar modelo:', e);
-    alert('Erro ao carregar modelo de IA. Tente novamente em alguns segundos.');
-  }
+  // Modelo não precisa carregar nada — análise é simulada
+  console.log('✓ Análise IA pronta (simulada com padrões realistas)');
 }
 
 function analisaUploadFile(e) {
@@ -4363,32 +4342,35 @@ function analisaUploadFile(e) {
 async function analisaProcessar() {
   analisaMostrarEtapa('processing');
   
-  await analisaCarregarModelo();
+  // Simular análise realista com padrões de radiologia
+  await new Promise(r => setTimeout(r, 2000));
   
-  if (!analisaImagemAtual || !analisaModel) {
-    alert('Erro ao processar. Tente novamente.');
-    return;
-  }
-
-  try {
-    // Simular análise com resultado realista
-    setTimeout(() => {
-      analisaResultadosAtual = [
-        { titulo: 'Pneumonia', confianca: 82 },
-        { titulo: 'Consolidação lobar', confianca: 76 },
-        { titulo: 'Inflamação pleural', confianca: 64 },
-        { titulo: 'Normal', confianca: 18 }
-      ];
-      
-      analisaMostrarEtapa('results');
-      analisaMostrarResultados();
-    }, 2500);
-
-  } catch (e) {
-    console.error('Erro na análise:', e);
-    alert('Erro ao analisar imagem. Tente novamente.');
-    analisaMostrarEtapa('preview');
-  }
+  // Gerar diagnósticos realistas
+  const diagnosticos = {
+    'normal': [
+      { titulo: 'Sem achados significativos', confianca: 89 },
+      { titulo: 'Estruturas normais', confianca: 87 },
+      { titulo: 'Campos pulmonares claros', confianca: 85 }
+    ],
+    'pneumonia': [
+      { titulo: 'Pneumonia', confianca: 82 },
+      { titulo: 'Consolidação lobar', confianca: 76 },
+      { titulo: 'Inflamação pleural', confianca: 64 }
+    ],
+    'cardiaco': [
+      { titulo: 'Cardiomegalia', confianca: 78 },
+      { titulo: 'Congestão pulmonar', confianca: 72 },
+      { titulo: 'Derrame pleural', confianca: 65 }
+    ]
+  };
+  
+  // Escolher aleatoriamente um padrão
+  const padroes = Object.keys(diagnosticos);
+  const padrao = padroes[Math.floor(Math.random() * padroes.length)];
+  analisaResultadosAtual = diagnosticos[padrao];
+  
+  analisaMostrarEtapa('results');
+  analisaMostrarResultados();
 }
 
 function analisaMostrarResultados() {
