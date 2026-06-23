@@ -1255,8 +1255,9 @@ textarea.analise-form-control {
         <button class="icon-btn" onclick="navAno(1)">&#8250;</button>
       </div>
       <div class="page-nav" style="margin-top:10px;">
-        <button class="page-btn active" id="nav-cal" onclick="setPage('cal')">&#128197; Cal.</button>
-        <button class="page-btn" id="nav-dash" onclick="setPage('dash')">&#9632; Dashboard</button>
+        <button class="page-btn active" id="nav-cal" onclick="setPage('cal')">📅 Cal.</button>
+        <button class="page-btn" id="nav-dash" onclick="setPage('dash')">📊 Dashboard</button>
+        <button class="page-btn" id="nav-analise" onclick="setPage('analise')">🔍 IA</button>
       </div>
     </div>
 
@@ -4319,16 +4320,30 @@ let analisaModel = null;
 let analisaImagemAtual = null;
 let analisaResultadosAtual = [];
 
+// Aguardar TensorFlow Hub estar disponível
+async function analisaEsperarHub() {
+  let tentativas = 0;
+  while (!window.hub && tentativas < 50) {
+    await new Promise(r => setTimeout(r, 100));
+    tentativas++;
+  }
+  if (!window.hub) {
+    throw new Error('TensorFlow Hub não carregou');
+  }
+}
+
 // Carregar modelo ao iniciar
 async function analisaCarregarModelo() {
   try {
     if (!analisaModel) {
       console.log('Carregando modelo TensorFlow...');
+      await analisaEsperarHub();
       analisaModel = await hub.load('https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v2_100_224/classification/3');
-      console.log('Modelo carregado');
+      console.log('✓ Modelo carregado com sucesso');
     }
   } catch (e) {
     console.error('Erro ao carregar modelo:', e);
+    alert('Erro ao carregar modelo de IA. Tente novamente em alguns segundos.');
   }
 }
 
