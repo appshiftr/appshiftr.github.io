@@ -4347,59 +4347,105 @@ function detectarTipoImagem(canvas) {
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imageData.data;
   
-  // Contar características de ECG
-  let linhasHorizontais = 0;
-  let linhasVerticals = 0;
-  let pixeisPretos = 0;
-  let pixeisbrancos = 0;
-  let pixeisAtipicos = 0;
+  // ECG tem PADRÃO MUITO REGULAR de grade (linhas em intervalos constantes)
+  // RX tem variação ALEATÓRIA de tons
   
-  // Análise horizontal (procura por linhas do ECG - grade)
-  for (let y = 0; y < canvas.height; y++) {
-    for (let x = 0; x < canvas.width - 1; x++) {
+  let transicoesBordas = 0;      // Mudanças bruscas (ECG tem muitas)
+  let mudancasGraduais = 0;      // Mudanças suaves (RX tem muitas)
+  let linhasRetas = 0;           // Detecção de linhas horizontais (ECG)
+  let pixelsVermelhos = 0;       // ECG tem vermelhos
+  let pixelsGrayscale = 0;       // RX é grayscale
+  
+  // Análise de padrões na imagem
+  for (let y = 1; y < canvas.height - 1; y++) {
+    for (let x = 1; x < canvas.width - 1; x++) {
       const idx = (y * canvas.width + x) * 4;
       const r = data[idx];
       const g = data[idx+1];
       const b = data[idx+2];
-      const luminancia = (r + g + b) / 3;
       
-      // Contar padrões
-      if (luminancia < 50) pixeisPretos++;
-      if (luminancia > 200) pixeisbrancos++;
+      // Luminância do pixel atual
+      const lum = (r + g + b) / 3;
       
-      // ECG tem muitas linhas próximas e grade visível
-      if (y % 8 === 0 && luminancia > 180 && luminancia < 220) {
-        linhasHorizontais++;
+      // Luminância do pixel à direita
+      const idxDireita = (y * canvas.width + (x + 1)) * 4;
+      const lumDireita = (data[idxDireita] + data[idxDireita+1] + data[idxDireita+2]) / 3;
+      
+      // Luminância do pixel abaixo
+      const idxAbaixo = ((y + 1) * canvas.width + x) * 4;
+      const lumAbaixo = (data[idxAbaixo] + data[idxAbaixo+1] + data[idxAbaixo+2]) / 3;
+      
+      const mudanca = Math.abs(lum - lumDireita);
+      
+      // ECG: mudanças BRUSCAS (grade definida)
+      if (mudanca > 50) {
+        transicoesBordas++;
       }
-      if (x % 8 === 0 && luminancia > 180 && luminancia < 220) {
-        linhasVerticals++;
+      // RX: mudanças GRADUAIS (tons suaves)
+      else if (mudanca > 10 && mudanca <= 50) {
+        mudancasGraduais++;
+      }
+      
+      // ECG tem linha horizontal definida
+      if (Math.abs(lum - lumAbaixo) < 5 && mudanca > 20) {
+        linhasRetas++;
+      }
+      
+      // Cores (ECG pode ter vermelho)
+      if (r > g && r > b) {
+        pixelsVermelhos++;
+      }
+      
+      // Grayscale (RX é principalmente cinzento)
+      if (Math.abs(r - g) < 30 && Math.abs(g - b) < 30) {
+        pixelsGrayscale++;
       }
     }
   }
   
-  const pctPretos = (pixeisPretos / (canvas.width * canvas.height)) * 100;
-  const pctBrancos = (pixeisbrancos / (canvas.width * canvas.height)) * 100;
-  const padraoGrade = Math.max(linhasHorizontais, linhasVerticals);
+  const totalPixels = canvas.width * canvas.height;
+  const pctBordas = (transicoesBordas / totalPixels) * 100;
+  const pctGraduais = (mudancasGraduais / totalPixels) * 100;
+  const pctLinhas = (linhasRetas / totalPixels) * 100;
+  const pctVermelhos = (pixelsVermelhos / totalPixels) * 100;
+  const pctGrayscale = (pixelsGrayscale / totalPixels) * 100;
+  
+  // LÓGICA CORRIGIDA:
   
   // ECG características:
-  // - Muita grade (linhas em padrão)
-  // - Proporção de preto/branco mais constante
-  // - Padrão repetitivo de ondas
+  // - MUITAS transições bruscas (grade definida)
+  // - MUITAS linhas retas
+  // - Razão alta de bordas vs graduais (não é suave)
   
-  if (padraoGrade > 50 && pctPretos > 5 && pctPretos < 30 && pctBrancos > 30) {
+  if (pctBordas > pctGraduais && pctLinhas > 5) {
+    return 'ECG';
+  }
+  
+  // ECG com cores
+  if (pctVermelhos > 5 && pctLinhas > 5) {
     return 'ECG';
   }
   
   // RX características:
-  // - Variação contínua de tons
-  // - Sem padrão de grade
-  // - Estruturas anatômicas com transições suaves
+  // - Muitas mudanças GRADUAIS
+  // - Grayscale (cinzento)
+  // - Poucas linhas definidas
   
-  if (padraoGrade < 30) {
+  if (pctGraduais > pctBordas && pctGrayscale > 70 && pctLinhas < 5) {
     return 'RX';
   }
   
-  return 'INDETERMINADO';
+  // Se tem mais graduais que bordas, é RX
+  if (pctGraduais > pctBordas) {
+    return 'RX';
+  }
+  
+  // Fallback: Se tem linhas retas e mudanças bruscas, é ECG
+  if (pctLinhas > 3) {
+    return 'ECG';
+  }
+  
+  return 'RX';
 }
 
 // ═══════════════════════════════════════════════
