@@ -3588,7 +3588,7 @@ function limparTudo(){
 // RENDER PRINCIPAL
 // ═══════════════════════════════════════════════
 function setPage(p){
-  ['cal','dash'].forEach(id=>{
+  ['cal','dash','analise'].forEach(id=>{
     document.getElementById('page-'+id).classList.toggle('active', id===p);
     document.getElementById('nav-'+id).classList.toggle('active', id===p);
   });
