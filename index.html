@@ -4339,6 +4339,194 @@ async function analisaCarregarModelo() {
 }
 
 // ANÁLISE REAL: Analisar padrões genuínos da imagem
+// ═══════════════════════════════════════════════
+// DETECTAR TIPO DE IMAGEM (ECG vs RX vs Outro)
+// ═══════════════════════════════════════════════
+function detectarTipoImagem(canvas) {
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  
+  // Contar características de ECG
+  let linhasHorizontais = 0;
+  let linhasVerticals = 0;
+  let pixeisPretos = 0;
+  let pixeisbrancos = 0;
+  let pixeisAtipicos = 0;
+  
+  // Análise horizontal (procura por linhas do ECG - grade)
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width - 1; x++) {
+      const idx = (y * canvas.width + x) * 4;
+      const r = data[idx];
+      const g = data[idx+1];
+      const b = data[idx+2];
+      const luminancia = (r + g + b) / 3;
+      
+      // Contar padrões
+      if (luminancia < 50) pixeisPretos++;
+      if (luminancia > 200) pixeisbrancos++;
+      
+      // ECG tem muitas linhas próximas e grade visível
+      if (y % 8 === 0 && luminancia > 180 && luminancia < 220) {
+        linhasHorizontais++;
+      }
+      if (x % 8 === 0 && luminancia > 180 && luminancia < 220) {
+        linhasVerticals++;
+      }
+    }
+  }
+  
+  const pctPretos = (pixeisPretos / (canvas.width * canvas.height)) * 100;
+  const pctBrancos = (pixeisbrancos / (canvas.width * canvas.height)) * 100;
+  const padraoGrade = Math.max(linhasHorizontais, linhasVerticals);
+  
+  // ECG características:
+  // - Muita grade (linhas em padrão)
+  // - Proporção de preto/branco mais constante
+  // - Padrão repetitivo de ondas
+  
+  if (padraoGrade > 50 && pctPretos > 5 && pctPretos < 30 && pctBrancos > 30) {
+    return 'ECG';
+  }
+  
+  // RX características:
+  // - Variação contínua de tons
+  // - Sem padrão de grade
+  // - Estruturas anatômicas com transições suaves
+  
+  if (padraoGrade < 30) {
+    return 'RX';
+  }
+  
+  return 'INDETERMINADO';
+}
+
+// ═══════════════════════════════════════════════
+// ANÁLISE DE ECG (Eletrocardiograma)
+// ═══════════════════════════════════════════════
+async function analisarECG(canvas) {
+  return new Promise((resolve) => {
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    const diagnosticos = [];
+    
+    // ECG requer análise diferente de RX
+    // Procura por padrões de ondas P, QRS, T
+    let pixeisPretos = 0;
+    let pixelsPorLinha = new Array(canvas.height).fill(0);
+    
+    // Contar pretos por linha (para detectar padrão de ondas)
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i+1];
+      const b = data[i+2];
+      const luminancia = (r + g + b) / 3;
+      
+      if (luminancia < 100) {
+        pixeisPretos++;
+        const pixelIdx = Math.floor(i / 4);
+        const yPos = Math.floor(pixelIdx / canvas.width);
+        if (yPos < pixelsPorLinha.length) {
+          pixelsPorLinha[yPos]++;
+        }
+      }
+    }
+    
+    // Detectar picos (batidas cardíacas = picos de ondas QRS)
+    const picos = [];
+    const threshold = Math.max(...pixelsPorLinha) * 0.6;
+    
+    for (let y = 1; y < pixelsPorLinha.length - 1; y++) {
+      if (pixelsPorLinha[y] > threshold && 
+          pixelsPorLinha[y] > pixelsPorLinha[y-1] && 
+          pixelsPorLinha[y] > pixelsPorLinha[y+1]) {
+        picos.push(y);
+      }
+    }
+    
+    // Analisar distância entre picos
+    const distanciasPicos = [];
+    for (let i = 1; i < picos.length; i++) {
+      distanciasPicos.push(picos[i] - picos[i-1]);
+    }
+    
+    const mediaDistancia = distanciasPicos.length > 0 
+      ? distanciasPicos.reduce((a, b) => a + b) / distanciasPicos.length 
+      : 0;
+    
+    // Estimar FC (Frequência Cardíaca)
+    // Em um ECG padrão, a largura total corresponde a ~10 segundos
+    const tempoTotalSegundos = 10;
+    const batidadetectadas = picos.length;
+    const frequenciaCardiaca = Math.round((batidadetectadas / tempoTotalSegundos) * 60);
+    
+    // Analisar regularidade (variância das distâncias)
+    const varianciaDistancia = distanciasPicos.length > 0
+      ? distanciasPicos.reduce((sum, dist) => sum + Math.pow(dist - mediaDistancia, 2), 0) / distanciasPicos.length
+      : 0;
+    
+    const desvioRitmo = Math.sqrt(varianciaDistancia);
+    
+    // Diagnósticos para ECG
+    if (frequenciaCardiaca > 0) {
+      diagnosticos.push({
+        titulo: `FC: ${frequenciaCardiaca} bpm`,
+        confianca: 70
+      });
+      
+      if (frequenciaCardiaca > 100) {
+        diagnosticos.push({
+          titulo: 'Possível Taquicardia',
+          confianca: 65
+        });
+      } else if (frequenciaCardiaca < 60) {
+        diagnosticos.push({
+          titulo: 'Possível Bradicardia',
+          confianca: 65
+        });
+      }
+    }
+    
+    // Análise de ritmo
+    if (desvioRitmo < 5) {
+      diagnosticos.push({
+        titulo: 'Ritmo Regular',
+        confianca: 75
+      });
+    } else if (desvioRitmo < 15) {
+      diagnosticos.push({
+        titulo: 'Ritmo Irregular (ligeiro)',
+        confianca: 60
+      });
+    } else {
+      diagnosticos.push({
+        titulo: 'Ritmo Irregular (significativo)',
+        confianca: 65
+      });
+    }
+    
+    // Se não detectou nada
+    if (diagnosticos.length === 0) {
+      diagnosticos.push({
+        titulo: 'ECG: Análise inconclusiva',
+        confianca: 50
+      });
+      diagnosticos.push({
+        titulo: 'Recomenda-se avaliação profissional',
+        confianca: 40
+      });
+    }
+    
+    resolve(diagnosticos.slice(0, 5));
+  });
+}
+
+// ═══════════════════════════════════════════════
+// ANÁLISE DE RX (Raio-X / Imagens Médicas)
+// ═══════════════════════════════════════════════
 async function analisarPadrõesImagem(imagemData) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -4349,6 +4537,16 @@ async function analisarPadrõesImagem(imagemData) {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, 256, 256);
       
+      // PRIMEIRO: Detectar tipo de imagem
+      const tipoImagem = detectarTipoImagem(canvas);
+      
+      // Se for ECG, usar análise específica
+      if (tipoImagem === 'ECG') {
+        analisarECG(canvas).then(resolve);
+        return;
+      }
+      
+      // Se não, continuar com análise de RX
       const imageData = ctx.getImageData(0, 0, 256, 256);
       const data = imageData.data;
       
