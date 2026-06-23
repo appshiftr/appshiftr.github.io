@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shiftr-v5';
+const CACHE_NAME = 'shiftr-v6';
 
 const ASSETS = [
   './index.html',
@@ -6,7 +6,9 @@ const ASSETS = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/tensorflow.js/4.11.0/tf.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/tensorflow-hub/4.2.1/tf-hub.min.js'
 ];
 
 self.addEventListener('install', event => {
