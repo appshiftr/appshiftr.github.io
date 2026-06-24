@@ -34,6 +34,7 @@ export default async function handler(req, res) {
 
     // Verificar API Key
     const apiKey = process.env.ANTHROPIC_API_KEY;
+    console.log('🔑 API Key presente?', !!apiKey);
     if (!apiKey) {
       console.error('❌ ANTHROPIC_API_KEY não está configurada!');
       return res.status(500).json({ 
@@ -108,8 +109,9 @@ Seja preciso, técnico e apropriado para um médico.`
     // CHAMAR CLAUDE VISION API
     // ═══════════════════════════════════════════════════════════════
 
+    console.log('📤 Chamando Claude Vision API...');
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-opus-4-1-20250805',
       max_tokens: 2000,
       messages: [
         {
@@ -118,6 +120,7 @@ Seja preciso, técnico e apropriado para um médico.`
         }
       ]
     });
+    console.log('✅ Resposta de Claude recebida!');
 
     // Extrair texto da resposta
     const laudoCompleto = response.content[0].type === 'text' 
@@ -133,7 +136,7 @@ Seja preciso, técnico e apropriado para um médico.`
       laudo: laudoCompleto,
       tipo: 'laudo_completo',
       timestamp: new Date().toISOString(),
-      modelo: 'claude-3-5-sonnet-20241022',
+      modelo: 'claude-opus-4-1-20250805',
       tokens: {
         input: response.usage.input_tokens,
         output: response.usage.output_tokens
@@ -141,17 +144,22 @@ Seja preciso, técnico e apropriado para um médico.`
     });
 
   } catch (erro) {
-    console.error('❌ Erro na API:', erro);
+    console.error('❌ Erro COMPLETO na API:', {
+      message: erro.message,
+      status: erro.status,
+      error: erro.error,
+      stack: erro.stack
+    });
 
     // Erros específicos
-    if (erro.message.includes('401')) {
+    if (erro.message.includes('401') || erro.status === 401) {
       return res.status(401).json({ 
         erro: 'API Key inválida ou expirada',
         detalhes: erro.message 
       });
     }
 
-    if (erro.message.includes('429')) {
+    if (erro.message.includes('429') || erro.status === 429) {
       return res.status(429).json({ 
         erro: 'Limite de requisições atingido',
         detalhes: 'Aguarde um momento e tente novamente' 
