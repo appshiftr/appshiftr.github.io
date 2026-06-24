@@ -2,6 +2,7 @@
   "name": "shiftr-claude-vision",
   "version": "3.0.0",
   "description": "Shiftr com Claude Vision para análise médica profissional",
+  "type": "module",
   "main": "index.html",
   "scripts": {
     "dev": "vercel dev",
