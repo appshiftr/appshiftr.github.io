@@ -1430,14 +1430,14 @@ textarea.analise-form-control {
             padding:0.8rem;
             border-radius:0.5rem;
             border:2px solid var(--border);
-            background:var(--bg2);
+            background:var(--surface2);
             color:var(--text);
             font-size:14px;
             font-weight:600;
           ">
-            <option value="">-- Selecione o tipo --</option>
-            <option value="ECG">ECG (Eletrocardiograma)</option>
-            <option value="RX">Raio-X (Radiografia)</option>
+            <option value="" style="background:#212127;color:#f0eff5;">-- Selecione o tipo --</option>
+            <option value="ECG" style="background:#212127;color:#f0eff5;">ECG (Eletrocardiograma)</option>
+            <option value="RX" style="background:#212127;color:#f0eff5;">Raio-X (Radiografia)</option>
           </select>
         </div>
 
@@ -1455,7 +1455,7 @@ textarea.analise-form-control {
               padding:0.8rem;
               border-radius:0.5rem;
               border:2px solid var(--border);
-              background:var(--bg2);
+              background:var(--surface2);
               color:var(--text);
               font-size:14px;
             "
@@ -1475,7 +1475,7 @@ textarea.analise-form-control {
               padding:0.8rem;
               border-radius:0.5rem;
               border:2px solid var(--border);
-              background:var(--bg2);
+              background:var(--surface2);
               color:var(--text);
               font-size:14px;
               font-family:inherit;
@@ -1499,7 +1499,7 @@ textarea.analise-form-control {
               padding:0.8rem;
               border-radius:0.5rem;
               border:2px solid var(--border);
-              background:var(--bg2);
+              background:var(--surface2);
               color:var(--text);
               font-size:14px;
             "
@@ -1520,7 +1520,7 @@ textarea.analise-form-control {
               padding:0.8rem;
               border-radius:0.5rem;
               border:2px solid var(--border);
-              background:var(--bg2);
+              background:var(--surface2);
               color:var(--text);
               font-size:14px;
             "
@@ -1552,7 +1552,7 @@ textarea.analise-form-control {
             text-align:center;
             cursor:pointer;
             transition:all 0.3s;
-          " onclick="document.getElementById('laboratorio-file-input').click()" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+          " onclick="document.getElementById('laboratorio-file-input').click()" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
             <div style="font-size:1.5rem;margin-bottom:0.3rem;">📋</div>
             <div style="font-size:12px;color:var(--text3);">Clique para adicionar hemograma, bioquímica, etc</div>
             <div id="laboratorio-nome" style="margin-top:0.5rem;font-size:11px;color:var(--text2);"></div>
@@ -4931,7 +4931,7 @@ function analisaMostrarResultados() {
   if (analisaResultadosAtual[0]?.tipo === 'laudo_completo') {
     lista.innerHTML = `
       <div style="
-        background:var(--bg2);
+        background:var(--surface2);
         border:2px solid var(--border);
         border-radius:0.5rem;
         padding:1.5rem;
@@ -4946,7 +4946,7 @@ function analisaMostrarResultados() {
       ">
 ${analisaResultadosAtual[0].conteudo}
       </div>
-      <div style="margin-top:1rem;padding:1rem;background:var(--bg3);border-radius:0.5rem;font-size:11px;color:var(--text3);">
+      <div style="margin-top:1rem;padding:1rem;background:var(--surface3);border-radius:0.5rem;font-size:11px;color:var(--text3);">
         ⚠️ Este laudo foi gerado com análise de IA Claude Vision. Análise clínica profissional é necessária para conclusão diagnóstica.
       </div>
     `;
