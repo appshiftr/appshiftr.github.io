@@ -4348,7 +4348,7 @@ function detectarTipoImagem(canvas) {
   const data = imageData.data;
   
   // DETECÇÃO SIMPLES E ROBUSTA:
-  // ECG: Distribuição BIMODAL (muito preto OU muito branco)
+  // ECG: Distribuição BIMODAL (muito preto OU muito branco, poucos intermediários)
   // RX: Distribuição GAUSSIANA (muitos tons intermediários)
   
   let pixeisEscuros = 0;        // 0-60 (preto das ondas)
@@ -4374,24 +4374,25 @@ function detectarTipoImagem(canvas) {
   const pctIntermediarios = (pixeisIntermediarios / contagem) * 100;
   const pctClaros = (pixeisClaros / contagem) * 100;
   
-  // LÓGICA CORRIGIDA v3:
+  // ✅ LÓGICA CORRIGIDA v4:
   
-  // ECG é BINÁRIO: pretos + brancos, poucos intermediários
-  if (pctEscuros > 8 && pctClaros > 40 && pctIntermediarios < 50) {
-    return 'ECG';
-  }
-  
-  // RX é CONTÍNUO: muitos intermediários (pulmão, osso, ar)
-  if (pctIntermediarios > 45) {
+  // RX é CONTÍNUO: muitos intermediários (tons cinzas)
+  // Prioridade MÁXIMA: se tem muitos intermediários, é RX!
+  if (pctIntermediarios > 50) {
     return 'RX';
   }
   
-  // Se tem mais escuros+claros que intermediários = ECG
-  if ((pctEscuros + pctClaros) > pctIntermediarios) {
+  // ECG é BINÁRIO: pretos + brancos, MUITO POUCOS intermediários
+  if (pctIntermediarios < 30 && pctEscuros > 8 && pctClaros > 35) {
     return 'ECG';
   }
   
-  // Fallback: RX
+  // RX como fallback (mais intermediários que extremos)
+  if (pctIntermediarios > pctEscuros && pctIntermediarios > pctClaros) {
+    return 'RX';
+  }
+  
+  // Se não conseguir decidir, por segurança = RX
   return 'RX';
 }
 
@@ -4409,9 +4410,12 @@ async function analisarECG(canvas) {
     // ECG requer análise diferente de RX
     // Procura por padrões de ondas P, QRS, T
     let pixeisPretos = 0;
-    let pixelsPorLinha = new Array(canvas.height).fill(0);
     
-    // Contar pretos por linha (para detectar padrão de ondas)
+    // ✅ CORRIGIDO: Contar pretos por COLUNA (EIXO X = TEMPO)
+    // NÃO por linha (que é amplitude/altura)
+    let pixelsPorColuna = new Array(canvas.width).fill(0);
+    
+    // Coleta dados por COLUNA (X axis = tempo)
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i+1];
@@ -4421,83 +4425,101 @@ async function analisarECG(canvas) {
       if (luminancia < 100) {
         pixeisPretos++;
         const pixelIdx = Math.floor(i / 4);
-        const yPos = Math.floor(pixelIdx / canvas.width);
-        if (yPos < pixelsPorLinha.length) {
-          pixelsPorLinha[yPos]++;
+        const xPos = Math.floor(pixelIdx % canvas.width); // ✅ X, não Y
+        if (xPos < pixelsPorColuna.length) {
+          pixelsPorColuna[xPos]++;
         }
       }
     }
     
-    // Detectar picos (batidas cardíacas = picos de ondas QRS)
+    // ✅ CORRIGIDO: Detectar picos nas COLUNAS (TEMPO)
+    // Cada pico = 1 complexo QRS = 1 batida cardíaca
     const picos = [];
-    const threshold = Math.max(...pixelsPorLinha) * 0.6;
+    const threshold = Math.max(...pixelsPorColuna) * 0.5; // Um pouco mais sensível
     
-    for (let y = 1; y < pixelsPorLinha.length - 1; y++) {
-      if (pixelsPorLinha[y] > threshold && 
-          pixelsPorLinha[y] > pixelsPorLinha[y-1] && 
-          pixelsPorLinha[y] > pixelsPorLinha[y+1]) {
-        picos.push(y);
+    for (let x = 1; x < pixelsPorColuna.length - 1; x++) {
+      // Procurar picos: valor maior que vizinhos
+      if (pixelsPorColuna[x] > threshold && 
+          pixelsPorColuna[x] > pixelsPorColuna[x-1] && 
+          pixelsPorColuna[x] > pixelsPorColuna[x+1]) {
+        picos.push(x);
+      }
+    }
+    
+    // Filtrar picos muito próximos (ruído)
+    const picosFiltered = [];
+    const minDistancia = canvas.width / 50; // Mínimo de pixels entre picos
+    
+    for (let pico of picos) {
+      if (picosFiltered.length === 0 || pico - picosFiltered[picosFiltered.length - 1] > minDistancia) {
+        picosFiltered.push(pico);
       }
     }
     
     // Analisar distância entre picos
     const distanciasPicos = [];
-    for (let i = 1; i < picos.length; i++) {
-      distanciasPicos.push(picos[i] - picos[i-1]);
+    for (let i = 1; i < picosFiltered.length; i++) {
+      distanciasPicos.push(picosFiltered[i] - picosFiltered[i-1]);
     }
     
     const mediaDistancia = distanciasPicos.length > 0 
       ? distanciasPicos.reduce((a, b) => a + b) / distanciasPicos.length 
       : 0;
     
-    // Estimar FC (Frequência Cardíaca)
-    // Em um ECG padrão, a largura total corresponde a ~10 segundos
-    const tempoTotalSegundos = 10;
-    const batidadetectadas = picos.length;
-    const frequenciaCardiaca = Math.round((batidadetectadas / tempoTotalSegundos) * 60);
+    // ✅ CORRIGIDO: Estimar FC com LÓGICA CORRETA
+    // Se há N picos em uma largura de X pixels
+    // E um ECG padrão (25mm/s) é ~250 pixels para 10 segundos
+    // Então: FC = (N picos / (pixelWidth / 25)) * 60
     
-    // Analisar regularidade (variância das distâncias)
+    const pixelsPerSecond = canvas.width / 10; // Assumindo 10 segundos no ECG
+    const batidadetectadas = picosFiltered.length;
+    
+    // ✅ FÓRMULA CORRIGIDA
+    const frequenciaCardiaca = batidadetectadas > 0 
+      ? Math.round((batidadetectadas * pixelsPerSecond * 60) / canvas.width)
+      : 0;
+    
+    // Diagnósticos para ECG
+    if (frequenciaCardiaca > 0) {
+      diagnosticos.push({
+        titulo: `FC: ${frequenciaCardiaca} bpm`,
+        confianca: 75
+      });
+      
+      if (frequenciaCardiaca > 100) {
+        diagnosticos.push({
+          titulo: 'Possível Taquicardia',
+          confianca: 70
+        });
+      } else if (frequenciaCardiaca < 60) {
+        diagnosticos.push({
+          titulo: 'Possível Bradicardia',
+          confianca: 70
+        });
+      }
+    }
+    
+    // Análise de ritmo (variância das distâncias entre picos)
     const varianciaDistancia = distanciasPicos.length > 0
       ? distanciasPicos.reduce((sum, dist) => sum + Math.pow(dist - mediaDistancia, 2), 0) / distanciasPicos.length
       : 0;
     
     const desvioRitmo = Math.sqrt(varianciaDistancia);
     
-    // Diagnósticos para ECG
-    if (frequenciaCardiaca > 0) {
-      diagnosticos.push({
-        titulo: `FC: ${frequenciaCardiaca} bpm`,
-        confianca: 70
-      });
-      
-      if (frequenciaCardiaca > 100) {
-        diagnosticos.push({
-          titulo: 'Possível Taquicardia',
-          confianca: 65
-        });
-      } else if (frequenciaCardiaca < 60) {
-        diagnosticos.push({
-          titulo: 'Possível Bradicardia',
-          confianca: 65
-        });
-      }
-    }
-    
-    // Análise de ritmo
-    if (desvioRitmo < 5) {
+    if (desvioRitmo < 10) {
       diagnosticos.push({
         titulo: 'Ritmo Regular',
-        confianca: 75
+        confianca: 80
       });
-    } else if (desvioRitmo < 15) {
+    } else if (desvioRitmo < 20) {
       diagnosticos.push({
         titulo: 'Ritmo Irregular (ligeiro)',
-        confianca: 60
+        confianca: 65
       });
     } else {
       diagnosticos.push({
         titulo: 'Ritmo Irregular (significativo)',
-        confianca: 65
+        confianca: 70
       });
     }
     
