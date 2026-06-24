@@ -902,6 +902,82 @@ textarea.analise-form-control {
   min-height: 80px;
   resize: vertical;
 }
+
+/* ✅ DROPDOWN CUSTOMIZADO */
+.custom-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.custom-dropdown-trigger {
+  width: 100%;
+  padding: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+
+.custom-dropdown-trigger::after {
+  content: '▼';
+  font-size: 10px;
+  opacity: 0.6;
+  margin-left: 8px;
+}
+
+.custom-dropdown-trigger:hover {
+  background: var(--surface3);
+}
+
+.custom-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000;
+  display: none;
+}
+
+.custom-dropdown-menu.open {
+  display: block;
+}
+
+.custom-dropdown-item {
+  padding: 10px 8px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+.custom-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.custom-dropdown-item:hover {
+  background: var(--surface3);
+}
+
+.custom-dropdown-item.selected {
+  background: var(--accent);
+  color: var(--surface1);
+  font-weight: 600;
+}
 .analise-btn-group {
   display: flex;
   gap: 8px;
@@ -1603,12 +1679,19 @@ textarea.analise-form-control {
 
         <div class="analise-form-group">
           <label class="analise-form-label">Tipo de exame</label>
-          <select class="analise-form-control" id="analise-tipo-exame">
-            <option style="background: #1a1a1a; color: #e0e0e0;">Raio-X de tórax</option>
-            <option style="background: #1a1a1a; color: #e0e0e0;">Raio-X de abdomen</option>
-            <option style="background: #1a1a1a; color: #e0e0e0;">ECG (Eletrocardiograma)</option>
-            <option style="background: #1a1a1a; color: #e0e0e0;">Ultrassom</option>
-          </select>
+          <!-- DROPDOWN CUSTOMIZADO -->
+          <div class="custom-dropdown" id="analise-tipo-exame-dropdown">
+            <div class="custom-dropdown-trigger" id="analise-tipo-trigger">
+              -- Selecione o tipo --
+            </div>
+            <div class="custom-dropdown-menu" id="analise-tipo-menu">
+              <div class="custom-dropdown-item" data-value="Raio-X de tórax">Raio-X de tórax</div>
+              <div class="custom-dropdown-item" data-value="Raio-X de abdomen">Raio-X de abdomen</div>
+              <div class="custom-dropdown-item" data-value="ECG (Eletrocardiograma)">ECG (Eletrocardiograma)</div>
+              <div class="custom-dropdown-item" data-value="Ultrassom">Ultrassom</div>
+            </div>
+          </div>
+          <input type="hidden" id="analise-tipo-exame" value="">
         </div>
 
         <div class="analise-sugestoes">
@@ -2284,7 +2367,47 @@ document.addEventListener('DOMContentLoaded', function(){
   const ff = document.getElementById('mp-fixo-fim');
   if(fi) fi.addEventListener('change', atualizarPreviewFixo);
   if(ff) ff.addEventListener('change', atualizarPreviewFixo);
+
+  // ✅ INICIALIZAR DROPDOWN CUSTOMIZADO
+  inicializarDropdownCustomizado();
 });
+
+// ✅ FUNÇÃO: DROPDOWN CUSTOMIZADO
+function inicializarDropdownCustomizado() {
+  const dropdown = document.getElementById('analise-tipo-exame-dropdown');
+  const trigger = document.getElementById('analise-tipo-trigger');
+  const menu = document.getElementById('analise-tipo-menu');
+  const input = document.getElementById('analise-tipo-exame');
+  const items = menu.querySelectorAll('.custom-dropdown-item');
+
+  // Abrir/fechar menu
+  trigger.addEventListener('click', () => {
+    menu.classList.toggle('open');
+  });
+
+  // Selecionar item
+  items.forEach(item => {
+    item.addEventListener('click', () => {
+      const value = item.dataset.value;
+      input.value = value;
+      trigger.textContent = value;
+      
+      // Destacar seleção
+      items.forEach(i => i.classList.remove('selected'));
+      item.classList.add('selected');
+      
+      // Fechar menu
+      menu.classList.remove('open');
+    });
+  });
+
+  // Fechar menu ao clicar fora
+  document.addEventListener('click', (e) => {
+    if (!dropdown.contains(e.target)) {
+      menu.classList.remove('open');
+    }
+  });
+}
 
 // Converte HH:MM em minutos desde meia-noite
 function toMins(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
