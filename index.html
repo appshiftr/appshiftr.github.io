@@ -902,85 +902,6 @@ textarea.analise-form-control {
   min-height: 80px;
   resize: vertical;
 }
-
-/* ✅ DROPDOWN CUSTOMIZADO */
-.custom-dropdown {
-  position: relative;
-  width: 100%;
-}
-
-.custom-dropdown-trigger {
-  width: 100%;
-  padding: 8px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 12px;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  user-select: none;
-}
-
-.custom-dropdown-trigger::after {
-  content: '▼';
-  font-size: 10px;
-  opacity: 0.6;
-  margin-left: 8px;
-}
-
-.custom-dropdown-trigger:hover {
-  background: var(--surface3);
-}
-
-.custom-dropdown-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 var(--radius) var(--radius);
-  max-height: 200px;
-  overflow-y: auto;
-  z-index: 10000;
-  display: none;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-}
-
-.custom-dropdown-menu.open {
-  display: block;
-  background: #1a1a1a !important;
-}
-
-.custom-dropdown-item {
-  padding: 10px 8px;
-  color: #e0e0e0 !important;
-  background: #1a1a1a !important;
-  font-family: var(--mono);
-  font-size: 12px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border);
-  transition: background 0.2s;
-}
-
-.custom-dropdown-item:last-child {
-  border-bottom: none;
-}
-
-.custom-dropdown-item:hover {
-  background: #2a2a2a !important;
-}
-
-.custom-dropdown-item.selected {
-  background: var(--accent) !important;
-  color: var(--surface1) !important;
-  font-weight: 600;
-}
 .analise-btn-group {
   display: flex;
   gap: 8px;
@@ -1682,19 +1603,40 @@ textarea.analise-form-control {
 
         <div class="analise-form-group">
           <label class="analise-form-label">Tipo de exame</label>
-          <!-- DROPDOWN CUSTOMIZADO -->
-          <div class="custom-dropdown" id="analise-tipo-exame-dropdown">
-            <div class="custom-dropdown-trigger" id="analise-tipo-trigger">
-              -- Selecione o tipo --
-            </div>
-            <div class="custom-dropdown-menu" id="analise-tipo-menu">
-              <div class="custom-dropdown-item" data-value="Raio-X de tórax">Raio-X de tórax</div>
-              <div class="custom-dropdown-item" data-value="Raio-X de abdomen">Raio-X de abdomen</div>
-              <div class="custom-dropdown-item" data-value="ECG (Eletrocardiograma)">ECG (Eletrocardiograma)</div>
-              <div class="custom-dropdown-item" data-value="Ultrassom">Ultrassom</div>
+          <!-- DROPDOWN SIMPLES E FUNCIONAL -->
+          <div id="analise-tipo-dropdown-wrapper" style="position: relative; width: 100%;">
+            <button id="analise-tipo-btn" style="width: 100%; padding: 8px; background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; cursor: pointer; text-align: left; font-size: 12px;">-- Selecione o tipo --</button>
+            <div id="analise-tipo-menu" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #1a1a1a; border: 1px solid #444; border-top: none; border-radius: 0 0 4px 4px; z-index: 10000; margin-top: -1px;">
+              <div onclick="selecionarTipoExame('Raio-X de tórax')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; border-bottom: 1px solid #333; background: #1a1a1a;">Raio-X de tórax</div>
+              <div onclick="selecionarTipoExame('Raio-X de abdomen')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; border-bottom: 1px solid #333; background: #1a1a1a;">Raio-X de abdomen</div>
+              <div onclick="selecionarTipoExame('ECG (Eletrocardiograma)')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; border-bottom: 1px solid #333; background: #1a1a1a;">ECG (Eletrocardiograma)</div>
+              <div onclick="selecionarTipoExame('Ultrassom')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; background: #1a1a1a;">Ultrassom</div>
             </div>
           </div>
           <input type="hidden" id="analise-tipo-exame" value="">
+          
+          <script>
+            // Abrir/fechar dropdown
+            document.getElementById('analise-tipo-btn').addEventListener('click', function() {
+              var menu = document.getElementById('analise-tipo-menu');
+              menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+            });
+            
+            // Fechar ao clicar fora
+            document.addEventListener('click', function(e) {
+              var wrapper = document.getElementById('analise-tipo-dropdown-wrapper');
+              if (!wrapper.contains(e.target)) {
+                document.getElementById('analise-tipo-menu').style.display = 'none';
+              }
+            });
+            
+            // Selecionar tipo
+            function selecionarTipoExame(valor) {
+              document.getElementById('analise-tipo-exame').value = valor;
+              document.getElementById('analise-tipo-btn').textContent = valor;
+              document.getElementById('analise-tipo-menu').style.display = 'none';
+            }
+          </script>
         </div>
 
         <div class="analise-sugestoes">
@@ -2370,47 +2312,7 @@ document.addEventListener('DOMContentLoaded', function(){
   const ff = document.getElementById('mp-fixo-fim');
   if(fi) fi.addEventListener('change', atualizarPreviewFixo);
   if(ff) ff.addEventListener('change', atualizarPreviewFixo);
-
-  // ✅ INICIALIZAR DROPDOWN CUSTOMIZADO
-  inicializarDropdownCustomizado();
 });
-
-// ✅ FUNÇÃO: DROPDOWN CUSTOMIZADO
-function inicializarDropdownCustomizado() {
-  const dropdown = document.getElementById('analise-tipo-exame-dropdown');
-  const trigger = document.getElementById('analise-tipo-trigger');
-  const menu = document.getElementById('analise-tipo-menu');
-  const input = document.getElementById('analise-tipo-exame');
-  const items = menu.querySelectorAll('.custom-dropdown-item');
-
-  // Abrir/fechar menu
-  trigger.addEventListener('click', () => {
-    menu.classList.toggle('open');
-  });
-
-  // Selecionar item
-  items.forEach(item => {
-    item.addEventListener('click', () => {
-      const value = item.dataset.value;
-      input.value = value;
-      trigger.textContent = value;
-      
-      // Destacar seleção
-      items.forEach(i => i.classList.remove('selected'));
-      item.classList.add('selected');
-      
-      // Fechar menu
-      menu.classList.remove('open');
-    });
-  });
-
-  // Fechar menu ao clicar fora
-  document.addEventListener('click', (e) => {
-    if (!dropdown.contains(e.target)) {
-      menu.classList.remove('open');
-    }
-  });
-}
 
 // Converte HH:MM em minutos desde meia-noite
 function toMins(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
