@@ -1,4 +1,9 @@
-const CACHE_NAME = 'shiftr-v6';
+// ═══════════════════════════════════════════════════════════════
+// SERVICE WORKER v7 - FORÇA ATUALIZAÇÃO (NÃO FICA CONGELADO!)
+// ═══════════════════════════════════════════════════════════════
+
+const CACHE_NAME = 'shiftr-v7';
+const CACHE_VERSAO = 'v7-' + new Date().getTime(); // Força nova versão
 
 // Assets essenciais - APENAS arquivos que realmente existem
 const ASSETS = [
@@ -9,179 +14,140 @@ const ASSETS = [
   './apple-touch-icon.png'
 ];
 
-// CDNs que queremos cachear (TensorFlow + jsPDF)
+// CDNs externas
 const EXTERNAL_ASSETS = [
-  'https://cdnjs.cloudflare.com/ajax/libs/tensorflow.js/4.11.0/tf.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/tensorflow-hub/4.2.1/tf-hub.min.js',
+  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js',
+  'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2',
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
 ];
 
-// ═══════════════════════════════════════════════════════
-// INSTALL: Cachear apenas arquivos que existem
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// INSTALL: Cache assets (mas NOT agressivamente!)
+// ═══════════════════════════════════════════════════════════════
+
 self.addEventListener('install', event => {
+  console.log('🔧 [SW v7] Install iniciado...');
+  
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => {
-        // Cachear arquivos locais (essenciais)
-        return cache.addAll(ASSETS)
-          .catch(err => {
-            console.warn('[SW] Erro ao cachear assets locais:', err);
-            // Continua mesmo se falhar
-            return Promise.resolve();
-          });
-      })
-      .then(() => {
-        // Cachear CDNs (opcional - sem bloquear install)
-        return caches.open(CACHE_NAME)
-          .then(cache => {
-            // Tenta cachear cada CDN individualmente
-            // Se um falhar, não afeta os outros
-            return Promise.allSettled(
-              EXTERNAL_ASSETS.map(url => 
-                fetch(url)
-                  .then(res => {
-                    if (res.status === 200) {
-                      return cache.put(url, res);
-                    }
-                  })
-                  .catch(err => {
-                    console.warn(`[SW] Falha ao cachear ${url}:`, err);
-                    // Ignora erro individual
-                  })
-              )
-            );
-          });
-      })
-      .then(() => self.skipWaiting())
-      .catch(err => {
-        console.error('[SW] Erro crítico no install:', err);
-      })
-  );
-});
-
-// ═══════════════════════════════════════════════════════
-// ACTIVATE: Limpar caches antigos
-// ═══════════════════════════════════════════════════════
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(keys => {
-      // Deletar caches antigos (v1-v5)
-      return Promise.all(
-        keys
-          .filter(k => k !== CACHE_NAME)
-          .map(k => {
-            console.log('[SW] Deletando cache antigo:', k);
-            return caches.delete(k);
+    caches.open(CACHE_NAME).then(cache => {
+      // Cache apenas os assets locais
+      return Promise.allSettled(
+        ASSETS.map(asset => 
+          fetch(asset).then(response => {
+            if (response.ok) {
+              return cache.put(asset, response);
+            }
+          }).catch(err => {
+            console.warn(`⚠️ Não conseguiu cachear: ${asset}`, err);
           })
+        )
       );
+    }).then(() => {
+      console.log('✅ [SW v7] Assets cacheados com sucesso');
+      self.skipWaiting(); // Ativa imediatamente
     })
-      .then(() => {
-        // Reclama todos os clientes
-        return self.clients.claim();
-      })
-      .then(() => {
-        // Notifica clientes sobre atualização
-        return self.clients.matchAll();
-      })
-      .then(clients => {
-        clients.forEach(client => {
-          client.postMessage({ 
-            type: 'SW_UPDATED',
-            version: CACHE_NAME
-          });
-        });
-      })
   );
 });
 
-// ═══════════════════════════════════════════════════════
-// FETCH: Cache-first com fallback de rede
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ACTIVATE: Limpa caches antigos (CRITICAL!)
+// ═══════════════════════════════════════════════════════════════
+
+self.addEventListener('activate', event => {
+  console.log('🗑️  [SW v7] Limpando caches antigos...');
+  
+  event.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.map(cacheName => {
+          if (cacheName !== CACHE_NAME && !cacheName.includes('shiftr-v7')) {
+            console.log(`   ❌ Deletando: ${cacheName}`);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => {
+      console.log('✅ [SW v7] Caches antigos removidos');
+      // Notifica todas as abas pra recarregar
+      return self.clients.matchAll();
+    }).then(clients => {
+      clients.forEach(client => {
+        client.postMessage({
+          type: 'SW_UPDATED',
+          message: 'Nova versão disponível! Recarregando...'
+        });
+      });
+    })
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FETCH: Network-first para HTML, cache-first para assets
+// ═══════════════════════════════════════════════════════════════
+
 self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+  const { request } = event;
+  const url = new URL(request.url);
   
-  // NÃO cachear requisições de:
-  const skipCache = [
-    'firebase',
-    'googleapis',
-    'gstatic',
-    'google.com',
-    'recaptcha'
-  ].some(domain => url.hostname.includes(domain));
-  
-  // NÃO cachear POST, PUT, DELETE, etc
-  const isGetRequest = event.request.method === 'GET';
-  
-  // Se deve pular cache ou não é GET, deixa passar
-  if (skipCache || !isGetRequest) {
-    return;
+  // HTML: SEMPRE tenta buscar versão nova primeiro!
+  if (request.destination === '' || url.pathname.endsWith('.html') || url.pathname === '/') {
+    return event.respondWith(
+      fetch(request)
+        .then(response => {
+          // Se conseguiu, atualiza cache
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(request, responseClone);
+            });
+            return response;
+          }
+          // Se erro, usa cache
+          return caches.match(request);
+        })
+        .catch(() => caches.match(request))
+    );
   }
   
-  // Estratégia: Cache-first, fallback na rede
-  event.respondWith(
-    (async () => {
-      try {
-        // 1. Tenta buscar do cache
-        const cached = await caches.match(event.request);
-        if (cached) {
-          // Atualiza cache em background (não bloqueia resposta)
-          fetch(event.request)
-            .then(res => {
-              if (res && res.status === 200) {
-                const resClone = res.clone();
-                caches.open(CACHE_NAME)
-                  .then(cache => cache.put(event.request, resClone))
-                  .catch(() => {}); // Ignora erro
-              }
-            })
-            .catch(() => {}); // Ignora erro de rede
-          
-          return cached;
-        }
-        
-        // 2. Se não tem cache, busca na rede
-        const res = await fetch(event.request);
-        
-        // 3. Se conseguiu, cachea para próxima vez
-        if (res && res.status === 200) {
-          const resClone = res.clone();
-          try {
-            const cache = await caches.open(CACHE_NAME);
-            cache.put(event.request, resClone);
-          } catch (e) {
-            console.warn('[SW] Erro ao cachear resposta:', e);
-            // Continua mesmo se falhar
+  // Assets locais: cache-first (mais rápido)
+  if (ASSETS.includes(url.pathname)) {
+    return event.respondWith(
+      caches.match(request)
+        .then(response => response || fetch(request))
+        .catch(() => response)
+    );
+  }
+  
+  // CDNs externas: tenta rede, fallback cache
+  if (url.hostname.includes('cdn.') || url.hostname.includes('cloudflare')) {
+    return event.respondWith(
+      fetch(request)
+        .then(response => {
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(request, responseClone);
+            });
+            return response;
           }
-        }
-        
-        return res;
-      } catch (error) {
-        // Offline e sem cache = erro
-        console.error('[SW] Erro no fetch:', error);
-        throw error;
-      }
-    })()
-  );
+          return caches.match(request);
+        })
+        .catch(() => caches.match(request))
+    );
+  }
+  
+  // Padrão: passa pra rede normalmente
+  event.respondWith(fetch(request).catch(() => caches.match(request)));
 });
 
-// ═══════════════════════════════════════════════════════
-// MESSAGE: Comunicação com página principal
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// NOTIFICA O APP QUANDO HOUVER ATUALIZAÇÃO
+// ═══════════════════════════════════════════════════════════════
+
 self.addEventListener('message', event => {
-  // Página principal pede para atualizar
-  if (event.data?.type === 'SKIP_WAITING') {
-    console.log('[SW] Recebido SKIP_WAITING');
+  if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
-  
-  // Página principal pede status
-  if (event.data?.type === 'GET_STATUS') {
-    event.ports[0].postMessage({
-      version: CACHE_NAME,
-      status: 'active'
-    });
-  }
 });
 
-console.log('[SW] Service Worker v6 carregado:', CACHE_NAME);
+console.log('✅ [SW v7] Service Worker carregado com force update!');
