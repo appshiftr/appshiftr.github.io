@@ -111,7 +111,7 @@ Seja preciso, técnico e apropriado para um médico.`
 
     console.log('📤 Chamando Claude Vision API...');
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1000,
       messages: [
         {
@@ -136,7 +136,7 @@ Seja preciso, técnico e apropriado para um médico.`
       laudo: laudoCompleto,
       tipo: 'laudo_completo',
       timestamp: new Date().toISOString(),
-      modelo: 'claude-3-5-sonnet-20241022',
+      modelo: 'claude-sonnet-4-6',
       tokens: {
         input: response.usage.input_tokens,
         output: response.usage.output_tokens
