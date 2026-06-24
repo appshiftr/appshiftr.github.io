@@ -947,17 +947,20 @@ textarea.analise-form-control {
   border-radius: 0 0 var(--radius) var(--radius);
   max-height: 200px;
   overflow-y: auto;
-  z-index: 1000;
+  z-index: 10000;
   display: none;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
 }
 
 .custom-dropdown-menu.open {
   display: block;
+  background: #1a1a1a !important;
 }
 
 .custom-dropdown-item {
   padding: 10px 8px;
-  color: var(--text);
+  color: #e0e0e0 !important;
+  background: #1a1a1a !important;
   font-family: var(--mono);
   font-size: 12px;
   cursor: pointer;
@@ -970,12 +973,12 @@ textarea.analise-form-control {
 }
 
 .custom-dropdown-item:hover {
-  background: var(--surface3);
+  background: #2a2a2a !important;
 }
 
 .custom-dropdown-item.selected {
-  background: var(--accent);
-  color: var(--surface1);
+  background: var(--accent) !important;
+  color: var(--surface1) !important;
   font-weight: 600;
 }
 .analise-btn-group {
