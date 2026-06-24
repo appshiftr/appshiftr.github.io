@@ -1603,40 +1603,13 @@ textarea.analise-form-control {
 
         <div class="analise-form-group">
           <label class="analise-form-label">Tipo de exame</label>
-          <!-- DROPDOWN SIMPLES E FUNCIONAL -->
-          <div id="analise-tipo-dropdown-wrapper" style="position: relative; width: 100%;">
-            <button id="analise-tipo-btn" style="width: 100%; padding: 8px; background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; cursor: pointer; text-align: left; font-size: 12px;">-- Selecione o tipo --</button>
-            <div id="analise-tipo-menu" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #1a1a1a; border: 1px solid #444; border-top: none; border-radius: 0 0 4px 4px; z-index: 10000; margin-top: -1px;">
-              <div onclick="selecionarTipoExame('Raio-X de tórax')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; border-bottom: 1px solid #333; background: #1a1a1a;">Raio-X de tórax</div>
-              <div onclick="selecionarTipoExame('Raio-X de abdomen')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; border-bottom: 1px solid #333; background: #1a1a1a;">Raio-X de abdomen</div>
-              <div onclick="selecionarTipoExame('ECG (Eletrocardiograma)')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; border-bottom: 1px solid #333; background: #1a1a1a;">ECG (Eletrocardiograma)</div>
-              <div onclick="selecionarTipoExame('Ultrassom')" style="padding: 10px 8px; color: #e0e0e0; cursor: pointer; background: #1a1a1a;">Ultrassom</div>
-            </div>
-          </div>
-          <input type="hidden" id="analise-tipo-exame" value="">
-          
-          <script>
-            // Abrir/fechar dropdown
-            document.getElementById('analise-tipo-btn').addEventListener('click', function() {
-              var menu = document.getElementById('analise-tipo-menu');
-              menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-            });
-            
-            // Fechar ao clicar fora
-            document.addEventListener('click', function(e) {
-              var wrapper = document.getElementById('analise-tipo-dropdown-wrapper');
-              if (!wrapper.contains(e.target)) {
-                document.getElementById('analise-tipo-menu').style.display = 'none';
-              }
-            });
-            
-            // Selecionar tipo
-            function selecionarTipoExame(valor) {
-              document.getElementById('analise-tipo-exame').value = valor;
-              document.getElementById('analise-tipo-btn').textContent = valor;
-              document.getElementById('analise-tipo-menu').style.display = 'none';
-            }
-          </script>
+          <select class="analise-form-control" id="analise-tipo-exame">
+            <option value="">-- Selecione o tipo --</option>
+            <option value="Raio-X de tórax">Raio-X de tórax</option>
+            <option value="Raio-X de abdomen">Raio-X de abdomen</option>
+            <option value="ECG (Eletrocardiograma)">ECG (Eletrocardiograma)</option>
+            <option value="Ultrassom">Ultrassom</option>
+          </select>
         </div>
 
         <div class="analise-sugestoes">
