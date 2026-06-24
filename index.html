@@ -1404,11 +1404,11 @@ textarea.analise-form-control {
       <!-- ETAPA 1: Upload -->
       <div id="analise-step-upload">
         <div style="margin-bottom:1.5rem;">
-          <h2 style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:0.5rem;">🔍 Análise de Imagens com IA</h2>
-          <p style="font-size:12px;color:var(--text3);line-height:1.5;">Envie uma foto de Raio-X ou ECG. A IA analisará e sugerirá diagnósticos. Você confirma e gera o laudo.</p>
+          <h2 style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:0.5rem;">🔍 Análise com Claude Vision</h2>
+          <p style="font-size:12px;color:var(--text3);line-height:1.5;">Envie foto de Raio-X ou ECG. A IA Claude analisará junto com exames de lab e gerará laudo profissional.</p>
         </div>
 
-        <!-- SELEÇÃO DE TIPO DE EXAME -->
+        <!-- TIPO DE EXAME -->
         <div style="margin-bottom:1.5rem;">
           <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
             Tipo de exame:
@@ -1423,19 +1423,130 @@ textarea.analise-form-control {
             font-size:14px;
             font-weight:600;
           ">
-            <option value="">-- Selecione o tipo de exame --</option>
+            <option value="">-- Selecione o tipo --</option>
             <option value="ECG">ECG (Eletrocardiograma)</option>
             <option value="RX">Raio-X (Radiografia)</option>
           </select>
         </div>
 
-        <!-- UPLOAD DA IMAGEM -->
-        <div class="analise-upload-area" onclick="document.getElementById('analise-file-input').click()">
-          <div style="font-size:2rem;margin-bottom:0.5rem;">📸</div>
-          <div style="font-weight:600;color:var(--text);margin-bottom:0.3rem;">Clique para enviar ou arraste</div>
-          <div style="font-size:11px;color:var(--text3);">Escolha ECG ou Raio-X acima</div>
+        <!-- QUEIXA PRINCIPAL -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Queixa Principal:
+          </label>
+          <input 
+            type="text" 
+            id="paciente-queixa" 
+            placeholder="Ex: Tosse há 3 dias, dor no peito"
+            style="
+              width:100%;
+              padding:0.8rem;
+              border-radius:0.5rem;
+              border:2px solid var(--border);
+              background:var(--bg2);
+              color:var(--text);
+              font-size:14px;
+            "
+          >
         </div>
-        <input type="file" id="analise-file-input" accept="image/*" style="display:none;" onchange="analisaUploadFile(event)">
+
+        <!-- SINTOMAS ADICIONAIS -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Sintomas Adicionais:
+          </label>
+          <textarea 
+            id="paciente-sintomas" 
+            placeholder="Febre, falta de ar, etc..."
+            style="
+              width:100%;
+              padding:0.8rem;
+              border-radius:0.5rem;
+              border:2px solid var(--border);
+              background:var(--bg2);
+              color:var(--text);
+              font-size:14px;
+              font-family:inherit;
+              min-height:80px;
+              resize:vertical;
+            "
+          ></textarea>
+        </div>
+
+        <!-- MEDICAMENTOS -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Medicamentos em Uso:
+          </label>
+          <input 
+            type="text" 
+            id="paciente-medicamentos" 
+            placeholder="Ex: Dipirona 500mg, Amoxicilina 500mg"
+            style="
+              width:100%;
+              padding:0.8rem;
+              border-radius:0.5rem;
+              border:2px solid var(--border);
+              background:var(--bg2);
+              color:var(--text);
+              font-size:14px;
+            "
+          >
+        </div>
+
+        <!-- HISTÓRICO -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Histórico Médico:
+          </label>
+          <input 
+            type="text" 
+            id="paciente-historico" 
+            placeholder="Ex: Hipertensão, Diabetes, Asma"
+            style="
+              width:100%;
+              padding:0.8rem;
+              border-radius:0.5rem;
+              border:2px solid var(--border);
+              background:var(--bg2);
+              color:var(--text);
+              font-size:14px;
+            "
+          >
+        </div>
+
+        <!-- UPLOAD DA IMAGEM -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Imagem do Exame (ECG/RX):
+          </label>
+          <div class="analise-upload-area" onclick="document.getElementById('analise-file-input').click()" style="cursor:pointer;">
+            <div style="font-size:2rem;margin-bottom:0.5rem;">📸</div>
+            <div style="font-weight:600;color:var(--text);margin-bottom:0.3rem;">Clique ou arraste a imagem</div>
+            <div style="font-size:11px;color:var(--text3);">JPG, PNG, até 5MB</div>
+          </div>
+          <input type="file" id="analise-file-input" accept="image/*" style="display:none;" onchange="analisaUploadFile(event)">
+        </div>
+
+        <!-- UPLOAD DE EXAMES DE LAB -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Exames de Laboratório (Opcional):
+          </label>
+          <div style="
+            padding:1rem;
+            border:2px dashed var(--border);
+            border-radius:0.5rem;
+            text-align:center;
+            cursor:pointer;
+            transition:all 0.3s;
+          " onclick="document.getElementById('laboratorio-file-input').click()" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+            <div style="font-size:1.5rem;margin-bottom:0.3rem;">📋</div>
+            <div style="font-size:12px;color:var(--text3);">Clique para adicionar hemograma, bioquímica, etc</div>
+            <div id="laboratorio-nome" style="margin-top:0.5rem;font-size:11px;color:var(--text2);"></div>
+          </div>
+          <input type="file" id="laboratorio-file-input" accept="image/*,.pdf" style="display:none;" onchange="analisaUploadLaboratorio(event)">
+        </div>
       </div>
 
       <!-- ETAPA 2: Preview -->
@@ -1467,6 +1578,7 @@ textarea.analise-form-control {
         <div id="analise-resultados-lista"></div>
         <div class="analise-btn-group">
           <button class="analise-btn analise-btn-secondary" onclick="analisaVoltar()">← Voltar</button>
+          <button class="analise-btn" onclick="analisaImprimirLaudo()">🖨️ Imprimir</button>
           <button class="analise-btn" onclick="analisaAbrirEditor()">✓ Editar laudo</button>
         </div>
       </div>
@@ -4340,8 +4452,15 @@ window.gerarPDF            = gerarPDF;
 
 let analisaModel = null;
 let analisaImagemAtual = null;
-let analisaTipoExameSelecionado = null; // ✅ NOVO: Tipo selecionado pelo usuário
+let analisaTipoExameSelecionado = null; // ✅ Tipo selecionado
 let analisaResultadosAtual = [];
+let analisaLaboratorioBase64 = null; // ✅ NOVO: Arquivo de laboratório
+let analisaPaciente = {  // ✅ NOVO: Dados do paciente
+  queixa: '',
+  sintomas: '',
+  medicamentos: '',
+  historico: ''
+};
 
 // Carregar modelo CocoSSD
 async function analisaCarregarModelo() {
@@ -4833,6 +4952,19 @@ async function analisarRX(canvas) {
   });
 }
 
+// ✅ NOVO: Upload de exames de laboratório
+function analisaUploadLaboratorio(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    analisaLaboratorioBase64 = ev.target.result;
+    document.getElementById('laboratorio-nome').textContent = `✓ ${file.name}`;
+  };
+  reader.readAsDataURL(file);
+}
+
 function analisaUploadFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -4844,10 +4976,18 @@ function analisaUploadFile(e) {
     return;
   }
 
+  // ✅ NOVO: Coletar dados do paciente
+  analisaPaciente = {
+    queixa: document.getElementById('paciente-queixa')?.value || '',
+    sintomas: document.getElementById('paciente-sintomas')?.value || '',
+    medicamentos: document.getElementById('paciente-medicamentos')?.value || '',
+    historico: document.getElementById('paciente-historico')?.value || ''
+  };
+
   const reader = new FileReader();
   reader.onload = (ev) => {
     analisaImagemAtual = ev.target.result;
-    analisaTipoExameSelecionado = tipoExame; // ✅ Guardar tipo selecionado
+    analisaTipoExameSelecionado = tipoExame;
     document.getElementById('analise-preview').innerHTML = `<img src="${analisaImagemAtual}">`;
     analisaMostrarEtapa('preview');
   };
@@ -4863,56 +5003,94 @@ async function analisaProcessar() {
     return;
   }
   
-  // ✅ NOVO: Usar tipo selecionado pelo usuário (SEM detecção automática!)
   const tipoExame = analisaTipoExameSelecionado || document.getElementById('tipoExameSelecionado').value;
   
   try {
-    // Converter imagem para canvas
-    const img = new Image();
-    img.onload = async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      
-      // ✅ LÓGICA SIMPLES: Chamar direto baseado na seleção do usuário
-      if (tipoExame === 'ECG') {
-        analisaResultadosAtual = await analisarECG(canvas);
-      } else if (tipoExame === 'RX') {
-        analisaResultadosAtual = await analisarRX(canvas);
-      } else {
-        throw new Error('Tipo de exame não selecionado');
+    // ✅ NOVO: Chamar API Claude ao invés de análise local!
+    const imagemSemPrefix = analisaImagemAtual.split(',')[1]; // Remove "data:image/jpeg;base64,"
+    const laboratorioSemPrefix = analisaLaboratorioBase64 ? analisaLaboratorioBase64.split(',')[1] : null;
+
+    const response = await fetch('/api/analisar-com-claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imagemBase64: imagemSemPrefix,
+        laboratorioBase64: laboratorioSemPrefix,
+        tipo: tipoExame,
+        queixa: analisaPaciente.queixa,
+        sintomas: analisaPaciente.sintomas,
+        medicamentos: analisaPaciente.medicamentos,
+        historico: analisaPaciente.historico
+      })
+    });
+
+    if (!response.ok) {
+      const erro = await response.json();
+      throw new Error(erro.error || 'Erro na análise');
+    }
+
+    const dados = await response.json();
+    
+    // Guardar laudo completo
+    analisaResultadosAtual = [
+      {
+        titulo: 'Laudo Médico Completo',
+        confianca: 95,
+        tipo: 'laudo_completo',
+        conteudo: dados.laudo
       }
-      
-      // Aguardar pelo menos 2 segundos pra parecer que está processando
-      await new Promise(r => setTimeout(r, 2000));
-      
-      analisaMostrarEtapa('results');
-      analisaMostrarResultados();
-    };
-    img.src = analisaImagemAtual;
+    ];
+
+    analisaMostrarEtapa('results');
+    analisaMostrarResultados();
     
   } catch (e) {
     console.error('Erro na análise:', e);
-    alert('Erro ao analisar imagem. Tente novamente.');
+    alert(`Erro ao analisar: ${e.message}\n\nVerifique se a API Key está configurada em Vercel.`);
     analisaMostrarEtapa('preview');
   }
 }
 
 function analisaMostrarResultados() {
   const lista = document.getElementById('analise-resultados-lista');
-  lista.innerHTML = analisaResultadosAtual
-    .filter(r => r.confianca >= 30)
-    .map(r => `
-      <div class="analise-resultado">
-        <div class="analise-resultado-titulo">${r.titulo}</div>
-        <div class="analise-resultado-confianca">Confiança: ${r.confianca}%</div>
-        <div class="analise-barra-confianca">
-          <div class="analise-barra-fill" style="width:${r.confianca}%;"></div>
-        </div>
+  
+  // ✅ Se for laudo completo do Claude
+  if (analisaResultadosAtual[0]?.tipo === 'laudo_completo') {
+    lista.innerHTML = `
+      <div style="
+        background:var(--bg2);
+        border:2px solid var(--border);
+        border-radius:0.5rem;
+        padding:1.5rem;
+        color:var(--text);
+        line-height:1.8;
+        font-family:'Courier New', monospace;
+        font-size:12px;
+        white-space:pre-wrap;
+        word-wrap:break-word;
+        max-height:600px;
+        overflow-y:auto;
+      ">
+${analisaResultadosAtual[0].conteudo}
       </div>
-    `).join('');
+      <div style="margin-top:1rem;padding:1rem;background:var(--bg3);border-radius:0.5rem;font-size:11px;color:var(--text3);">
+        ⚠️ Este laudo foi gerado com análise de IA Claude Vision. Análise clínica profissional é necessária para conclusão diagnóstica.
+      </div>
+    `;
+  } else {
+    // Análise local (se houver)
+    lista.innerHTML = analisaResultadosAtual
+      .filter(r => r.confianca >= 30)
+      .map(r => `
+        <div class="analise-resultado">
+          <div class="analise-resultado-titulo">${r.titulo}</div>
+          <div class="analise-resultado-confianca">Confiança: ${r.confianca}%</div>
+          <div class="analise-barra-confianca">
+            <div class="analise-barra-fill" style="width:${r.confianca}%;"></div>
+          </div>
+        </div>
+      `).join('');
+  }
 }
 
 function analisaAbrirEditor() {
@@ -4925,6 +5103,76 @@ function analisaAbrirEditor() {
   document.getElementById('analise-diagnostico').value = analisaResultadosAtual[0]?.titulo || '';
   
   analisaMostrarEtapa('editor');
+}
+
+// ✅ NOVO: Imprimir laudo
+function analisaImprimirLaudo() {
+  if (!analisaResultadosAtual[0]?.conteudo) {
+    alert('Nenhum laudo disponível para impressão');
+    return;
+  }
+
+  const janela = window.open('', '', 'height=700,width=900');
+  janela.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Laudo Médico</title>
+      <style>
+        body { 
+          font-family: 'Courier New', monospace; 
+          margin: 40px; 
+          line-height: 1.8;
+          font-size: 11px;
+          color: #333;
+        }
+        h1 { color: #0f0f11; text-align: center; }
+        .header { 
+          text-align: center; 
+          margin-bottom: 40px;
+          border-bottom: 2px solid #0f0f11;
+          padding-bottom: 20px;
+        }
+        .footer { 
+          margin-top: 60px; 
+          border-top: 1px solid #999; 
+          padding-top: 20px; 
+          font-size: 10px; 
+          color: #666; 
+          text-align: center;
+        }
+        .aviso {
+          background: #fffacd;
+          padding: 10px;
+          border-left: 4px solid #ffc107;
+          margin: 20px 0;
+          font-size: 10px;
+        }
+        pre { 
+          white-space: pre-wrap; 
+          word-wrap: break-word;
+          font-family: 'Courier New', monospace;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>SHIFTR - LAUDO MÉDICO</h1>
+        <p>Data: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}</p>
+      </div>
+      <pre>${analisaResultadosAtual[0].conteudo}</pre>
+      <div class="aviso">
+        ⚠️ Este laudo foi gerado com análise de IA Claude Vision. Análise clínica profissional é necessária para conclusão diagnóstica.
+      </div>
+      <div class="footer">
+        <p>Sistema Shiftr - Análise Médica com IA</p>
+        <p>Documento gerado automaticamente</p>
+      </div>
+    </body>
+    </html>
+  `);
+  janela.document.close();
+  setTimeout(() => janela.print(), 500);
 }
 
 function analisaGerarLaudo() {
