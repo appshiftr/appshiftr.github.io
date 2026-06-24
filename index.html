@@ -882,6 +882,18 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   font-family: var(--mono);
   font-size: 12px;
 }
+
+/* ✅ FIX: SELECT com fundo escuro */
+select.analise-form-control {
+  background-color: var(--surface2);
+  color: var(--text);
+}
+
+select.analise-form-control option {
+  background-color: var(--surface2);
+  color: var(--text);
+}
+
 .analise-form-control:focus {
   outline: none;
   border-color: var(--accent);
