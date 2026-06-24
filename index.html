@@ -4870,7 +4870,7 @@ async function analisaProcessar() {
     const imagemSemPrefix = analisaImagemAtual.split(',')[1]; // Remove "data:image/jpeg;base64,"
     const laboratorioSemPrefix = analisaLaboratorioBase64 ? analisaLaboratorioBase64.split(',')[1] : null;
 
-    const response = await fetch('/api/analisar-com-claude', {
+    const response = await fetch('https://appshiftr-github-io.vercel.app/api/analisar-com-claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
