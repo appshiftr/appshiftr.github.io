@@ -5402,11 +5402,27 @@ function analisaMostrarEtapa(etapa) {
 function analisaVoltar() {
   analisaMostrarEtapa('upload');
   analisaRemoverImagem();
+
+  // Limpa laboratório (arquivo e texto)
   analisaLaboratorioBase64 = null;
   analisaLaboratorioMimeType = null;
   document.getElementById('laboratorio-file-input').value = '';
   document.getElementById('laboratorio-nome').textContent = '';
   document.getElementById('paciente-laboratorio-texto').value = '';
+
+  // ✅ Limpa todos os campos do paciente — cada análise é de um paciente
+  // diferente, não deve sobrar dado do atendimento anterior
+  document.getElementById('tipoExameSelecionado').value = '';
+  document.getElementById('paciente-queixa').value = '';
+  document.getElementById('paciente-sintomas').value = '';
+  document.getElementById('paciente-sinais-vitais').value = '';
+  document.getElementById('paciente-medicamentos').value = '';
+  document.getElementById('paciente-historico').value = '';
+
+  // Limpa o resultado da análise anterior
+  analisaResultadosAtual = [];
+  analisaResumoProntuarioAtual = '';
+  analisaTipoExameSelecionado = null;
 }
 
 function analisaAbrirResultados() {
