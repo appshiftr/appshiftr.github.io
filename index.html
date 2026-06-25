@@ -18,11 +18,12 @@
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
     // ✅ FIX: GitHub Pages cacheia sw.js por 10 min (Cache-Control: max-age=600)
-    // e não dá pra configurar isso. Sem isso, reload repetido só renova
-    // o cache de 10 min sem nunca buscar a versão nova de fato.
-    // O "?v=" muda a URL a cada carregamento, então o navegador SEMPRE
-    // busca da rede, ignorando esse cache.
-    navigator.serviceWorker.register('./sw.js?v=' + Date.now()).then(reg => {
+    // e não dá pra configurar isso headers customizados nessa hospedagem.
+    // updateViaCache:'none' faz o navegador SEMPRE buscar o sw.js fresco da
+    // rede em toda checagem de atualização, ignorando esse cache de 10min —
+    // mas mantendo a MESMA URL sempre, então só reinstala quando o conteúdo
+    // realmente mudar (evita loop de reinstalação).
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
 
       // Checa por updates a cada 60 segundos (app aberto em background)
       setInterval(() => reg.update(), 60000);
