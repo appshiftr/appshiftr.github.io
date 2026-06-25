@@ -23,7 +23,7 @@ export default async function handler(req, res) {
 
   try {
     // Extrair dados do request
-    const { imagemBase64, laboratorioBase64, laboratorioTexto, tipo, queixa, sintomas, sinaisVitais, medicamentos, historico } = req.body;
+    const { imagemBase64, laboratorioBase64, laboratorioMimeType, laboratorioTexto, tipo, queixa, sintomas, sinaisVitais, medicamentos, historico } = req.body;
 
     // Validar campos obrigatórios
     // ✅ Imagem principal agora é OPCIONAL — permite análise só com dados
@@ -98,7 +98,7 @@ ${laboratorioTexto ? `- Resultado de laboratório (informado em texto): ${labora
 Por favor, forneça um laudo estruturado com:
 ${estruturaSecoes}
 
-Seja preciso, técnico e apropriado para um médico nas seções 1 a ${numUltimaSecao} acima.
+Seja preciso, técnico e apropriado para um médico nas seções 1 a ${numUltimaSecao} acima. IMPORTANTE: este texto será exibido como texto puro (não há renderização de markdown no app) — então NÃO use tabelas markdown (com |), não use múltiplos emojis decorativos por linha, e use no máximo negrito (**) com moderação. Prefira texto corrido e listas simples com hífen. Seja completo, mas direto — isso também garante que o laudo não seja cortado por limite de tamanho antes de chegar nas seções finais.
 
 Depois da seção ${numUltimaSecao}, inclua uma seção adicional, EXATAMENTE com este título em uma linha própria:
 RESUMO PARA PRONTUÁRIO:
@@ -141,23 +141,38 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
       });
     }
 
-    // Adicionar imagem de laboratório (opcional)
+    // Adicionar imagem/documento de laboratório (opcional)
     if (laboratorioBase64) {
       conteudo.push({
         type: 'text',
         text: temImagem
-          ? 'Aqui está também a imagem de laboratório/exames complementares:'
-          : 'Aqui está a imagem do exame de laboratório:'
+          ? 'Aqui está também o exame de laboratório/exames complementares:'
+          : 'Aqui está o exame de laboratório:'
       });
-      
-      conteudo.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: laboratorioBase64
-        }
-      });
+
+      // ✅ FIX: PDF de verdade usa o content type "document" do Claude
+      // (ele lê o PDF nativamente). Antes, todo arquivo de laboratório era
+      // mandado como se fosse imagem JPEG — um PDF real, marcado como
+      // JPEG, fazia a API da Anthropic rejeitar com erro.
+      if (laboratorioMimeType === 'application/pdf') {
+        conteudo.push({
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: 'application/pdf',
+            data: laboratorioBase64
+          }
+        });
+      } else {
+        conteudo.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/jpeg',
+            data: laboratorioBase64
+          }
+        });
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -167,7 +182,7 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
     console.log('📤 Chamando Claude Vision API...');
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 4096,
       messages: [
         {
           role: 'user',
@@ -182,6 +197,14 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
       ? response.content[0].text 
       : '';
 
+    // ✅ Detecta se a resposta foi cortada pelo limite de tokens — sem isso,
+    // um laudo incompleto (faltando até o resumo pra prontuário) era
+    // devolvido normalmente, sem nenhum aviso de que faltou pedaço.
+    const foiTruncado = response.stop_reason === 'max_tokens';
+    if (foiTruncado) {
+      console.warn('⚠️ Resposta CORTADA por limite de tokens! output_tokens:', response.usage.output_tokens);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // RETORNAR RESPOSTA
     // ═══════════════════════════════════════════════════════════════
@@ -190,6 +213,7 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
       sucesso: true,
       laudo: laudoCompleto,
       tipo: 'laudo_completo',
+      truncado: foiTruncado,
       timestamp: new Date().toISOString(),
       modelo: 'claude-sonnet-4-6',
       tokens: {

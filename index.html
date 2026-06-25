@@ -4600,6 +4600,7 @@ let analisaImagemAtual = null;
 let analisaTipoExameSelecionado = null; // ✅ Tipo selecionado
 let analisaResultadosAtual = [];
 let analisaLaboratorioBase64 = null; // ✅ NOVO: Arquivo de laboratório
+let analisaLaboratorioMimeType = null; // ✅ NOVO: tipo real do arquivo (PDF ou imagem)
 let analisaResumoProntuarioAtual = ''; // ✅ NOVO: Resumo simplificado pra copiar no prontuário
 let analisaPaciente = {  // ✅ NOVO: Dados do paciente
   queixa: '',
@@ -5032,6 +5033,7 @@ function analisaUploadLaboratorio(e) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       analisaLaboratorioBase64 = ev.target.result;
+      analisaLaboratorioMimeType = 'application/pdf';
       document.getElementById('laboratorio-nome').textContent = `✓ ${file.name}`;
     };
     reader.readAsDataURL(file);
@@ -5041,6 +5043,7 @@ function analisaUploadLaboratorio(e) {
   redimensionarImagem(file)
     .then(dataUrl => {
       analisaLaboratorioBase64 = dataUrl;
+      analisaLaboratorioMimeType = 'image/jpeg';
       document.getElementById('laboratorio-nome').textContent = `✓ ${file.name}`;
     })
     .catch(err => {
@@ -5152,6 +5155,7 @@ async function analisaProcessar() {
       body: JSON.stringify({
         imagemBase64: imagemSemPrefix,
         laboratorioBase64: laboratorioSemPrefix,
+        laboratorioMimeType: analisaLaboratorioMimeType,
         laboratorioTexto: analisaPaciente.laboratorioTexto,
         tipo: tipoExame,
         queixa: analisaPaciente.queixa,
@@ -5176,7 +5180,7 @@ async function analisaProcessar() {
         analisaMostrarEtapa('preview');
         return;
       }
-      throw new Error(dados.erro || 'Erro na análise');
+      throw new Error(dados.detalhes ? `${dados.erro}: ${dados.detalhes}` : (dados.erro || 'Erro na análise'));
     }
 
     // Guardar laudo completo
@@ -5185,9 +5189,14 @@ async function analisaProcessar() {
         titulo: 'Laudo Médico Completo',
         confianca: 95,
         tipo: 'laudo_completo',
-        conteudo: dados.laudo
+        conteudo: dados.laudo,
+        truncado: !!dados.truncado
       }
     ];
+
+    if (dados.truncado) {
+      console.warn('⚠️ Laudo retornado incompleto (cortado por limite de tokens)');
+    }
 
     // Atualiza o saldo exibido com o valor que o servidor confirmou
     if (typeof dados.saldo === 'number') {
@@ -5203,10 +5212,11 @@ async function analisaProcessar() {
     logErro('analise_ia', e, {
       tipoExame,
       tamanhoImagemKB: analisaImagemAtual ? Math.round(analisaImagemAtual.length / 1024) : null,
-      tinhaLaboratorio: !!analisaLaboratorioBase64
+      tinhaLaboratorio: !!(analisaLaboratorioBase64 || document.getElementById('paciente-laboratorio-texto')?.value?.trim()),
+      laboratorioMimeType: analisaLaboratorioMimeType
     });
     alert(`Erro ao analisar: ${e.message}`);
-    analisaMostrarEtapa('preview');
+    analisaMostrarEtapa(etapaVolta);
   }
 }
 
@@ -5272,6 +5282,11 @@ function analisaMostrarResultados() {
     }
 
     lista.innerHTML = `
+      ${analisaResultadosAtual[0].truncado ? `
+      <div style="margin-bottom:1rem;padding:1rem;background:#3d2a00;border:2px solid #ffc107;border-radius:0.5rem;color:#ffc107;font-size:12px;">
+        ⚠️ <strong>Atenção:</strong> este laudo pode estar incompleto — a resposta foi cortada por exceder o limite de tamanho (laudo muito extenso). O resumo pra prontuário pode não ter sido gerado. Recomendado gerar a análise novamente.
+      </div>
+      ` : ''}
       <div style="
         background:var(--surface2);
         border:2px solid var(--border);
