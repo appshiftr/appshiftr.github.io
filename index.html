@@ -1574,10 +1574,17 @@ textarea.analise-form-control {
           <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
             Imagem do Exame (ECG/RX):
           </label>
-          <div class="analise-upload-area" onclick="document.getElementById('analise-file-input').click()" style="cursor:pointer;">
+          <div id="analise-upload-area" class="analise-upload-area" onclick="document.getElementById('analise-file-input').click()" style="cursor:pointer;">
             <div style="font-size:2rem;margin-bottom:0.5rem;">📸</div>
             <div style="font-weight:600;color:var(--text);margin-bottom:0.3rem;">Clique ou arraste a imagem</div>
             <div style="font-size:11px;color:var(--text3);">JPG, PNG, até 5MB</div>
+          </div>
+          <div id="analise-imagem-preview-wrap" style="display:none;">
+            <div class="analise-preview" id="analise-preview"></div>
+            <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+              <button class="analise-btn analise-btn-secondary" onclick="analisaGirarImagem()" style="flex:1;">🔄 Girar</button>
+              <button class="analise-btn analise-btn-secondary" onclick="analisaRemoverImagem()" style="flex:1;">✕ Remover</button>
+            </div>
           </div>
           <input type="file" id="analise-file-input" accept="image/*" style="display:none;" onchange="analisaUploadFile(event)">
         </div>
@@ -1625,25 +1632,10 @@ textarea.analise-form-control {
           ></textarea>
         </div>
 
-        <!-- ANALISAR SEM IMAGEM (só com texto/laboratório) -->
-        <button class="analise-btn analise-btn-secondary" onclick="analisaIniciarSemImagem()" style="margin-top:0.5rem;">
-          🔍 Analisar sem imagem (só com os dados acima)
-        </button>
-      </div>
-
-      <!-- ETAPA 2: Preview -->
-      <div id="analise-step-preview" style="display:none;">
-        <div style="margin-bottom:1rem;">
-          <div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">Imagem carregada</div>
-        </div>
-        <div class="analise-preview" id="analise-preview"></div>
-        <button class="analise-btn analise-btn-secondary" onclick="analisaGirarImagem()" style="margin-bottom:0.6rem;">
-          🔄 Girar imagem
-        </button>
-        <button class="analise-btn" onclick="analisaProcessar()">
+        <!-- ANALISAR (funciona com imagem, laboratório, ou os dois juntos) -->
+        <button class="analise-btn" onclick="analisaIniciarAnalise()" style="margin-top:0.5rem;">
           🔍 Analisar com IA
         </button>
-        <button class="analise-btn analise-btn-secondary" onclick="analisaVoltar()">← Voltar</button>
       </div>
 
       <!-- ETAPA 3: Processando -->
@@ -5056,29 +5048,12 @@ function analisaUploadFile(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  // ✅ VALIDAR: Tipo de exame foi selecionado?
-  const tipoExame = document.getElementById('tipoExameSelecionado').value;
-  if (!tipoExame) {
-    alert('⚠️ Por favor, selecione o tipo de exame (ECG ou Raio-X) antes de enviar a imagem.');
-    return;
-  }
-
-  // ✅ Coletar dados do paciente
-  analisaPaciente = {
-    queixa: document.getElementById('paciente-queixa')?.value || '',
-    sintomas: document.getElementById('paciente-sintomas')?.value || '',
-    sinaisVitais: document.getElementById('paciente-sinais-vitais')?.value || '',
-    medicamentos: document.getElementById('paciente-medicamentos')?.value || '',
-    historico: document.getElementById('paciente-historico')?.value || '',
-    laboratorioTexto: document.getElementById('paciente-laboratorio-texto')?.value || ''
-  };
-
   redimensionarImagem(file)
     .then(dataUrl => {
       analisaImagemAtual = dataUrl;
-      analisaTipoExameSelecionado = tipoExame;
       document.getElementById('analise-preview').innerHTML = `<img src="${dataUrl}">`;
-      analisaMostrarEtapa('preview');
+      document.getElementById('analise-upload-area').style.display = 'none';
+      document.getElementById('analise-imagem-preview-wrap').style.display = 'block';
     })
     .catch(err => {
       console.error('Erro ao processar imagem:', err);
@@ -5086,9 +5061,17 @@ function analisaUploadFile(e) {
     });
 }
 
-// ✅ NOVO: Analisar só com dados de laboratório, sem imagem de ECG/RX —
-// pra paciente que só precisa de interpretação de exame, sem ECG/RX feito
-function analisaIniciarSemImagem() {
+// ✅ NOVO: Remove a imagem anexada, voltando a mostrar a caixa de upload
+function analisaRemoverImagem() {
+  analisaImagemAtual = null;
+  document.getElementById('analise-file-input').value = '';
+  document.getElementById('analise-preview').innerHTML = '';
+  document.getElementById('analise-upload-area').style.display = 'block';
+  document.getElementById('analise-imagem-preview-wrap').style.display = 'none';
+}
+
+// ✅ Inicia a análise — funciona com imagem, laboratório (arquivo/texto), ou os dois juntos
+function analisaIniciarAnalise() {
   const tipoExame = document.getElementById('tipoExameSelecionado').value;
   if (!tipoExame) {
     alert('⚠️ Por favor, selecione o tipo de exame antes de analisar.');
@@ -5096,8 +5079,8 @@ function analisaIniciarSemImagem() {
   }
 
   const laboratorioTexto = document.getElementById('paciente-laboratorio-texto')?.value?.trim() || '';
-  if (!laboratorioTexto && !analisaLaboratorioBase64) {
-    alert('⚠️ Anexe um arquivo de laboratório ou cole/digite o resultado no campo de texto antes de analisar sem imagem.');
+  if (!analisaImagemAtual && !laboratorioTexto && !analisaLaboratorioBase64) {
+    alert('⚠️ Anexe uma imagem de exame e/ou dados de laboratório (arquivo ou texto) antes de analisar.');
     return;
   }
 
@@ -5110,7 +5093,6 @@ function analisaIniciarSemImagem() {
     laboratorioTexto
   };
 
-  analisaImagemAtual = null; // sem imagem principal nesse fluxo
   analisaTipoExameSelecionado = tipoExame;
   analisaProcessar();
 }
@@ -5119,7 +5101,7 @@ async function analisaProcessar() {
   analisaMostrarEtapa('processing');
 
   const temLaboratorio = !!(analisaLaboratorioBase64 || document.getElementById('paciente-laboratorio-texto')?.value?.trim());
-  const etapaVolta = analisaImagemAtual ? 'preview' : 'upload';
+  const etapaVolta = 'upload';
 
   if (!analisaImagemAtual && !temLaboratorio) {
     alert('Envie uma imagem de exame OU informe dados de laboratório (arquivo ou texto) pra poder analisar.');
@@ -5172,12 +5154,12 @@ async function analisaProcessar() {
       if (response.status === 402 || dados.semCreditos) {
         alert('⚠️ Você não tem créditos suficientes para fazer essa análise.\n\nEm breve você poderá recarregar créditos direto pelo app.');
         analisaAtualizarSaldo();
-        analisaMostrarEtapa('preview');
+        analisaMostrarEtapa(etapaVolta);
         return;
       }
       if (response.status === 401) {
         alert('Sua sessão expirou. Faça login novamente.');
-        analisaMostrarEtapa('preview');
+        analisaMostrarEtapa(etapaVolta);
         return;
       }
       throw new Error(dados.detalhes ? `${dados.erro}: ${dados.detalhes}` : (dados.erro || 'Erro na análise'));
@@ -5411,7 +5393,6 @@ function analisaCopiarLaudo() {
 
 function analisaMostrarEtapa(etapa) {
   document.getElementById('analise-step-upload').style.display = etapa === 'upload' ? 'block' : 'none';
-  document.getElementById('analise-step-preview').style.display = etapa === 'preview' ? 'block' : 'none';
   document.getElementById('analise-step-processing').style.display = etapa === 'processing' ? 'block' : 'none';
   document.getElementById('analise-step-results').style.display = etapa === 'results' ? 'block' : 'none';
   document.getElementById('analise-step-editor').style.display = etapa === 'editor' ? 'block' : 'none';
@@ -5420,8 +5401,12 @@ function analisaMostrarEtapa(etapa) {
 
 function analisaVoltar() {
   analisaMostrarEtapa('upload');
-  document.getElementById('analise-file-input').value = '';
-  analisaImagemAtual = null;
+  analisaRemoverImagem();
+  analisaLaboratorioBase64 = null;
+  analisaLaboratorioMimeType = null;
+  document.getElementById('laboratorio-file-input').value = '';
+  document.getElementById('laboratorio-nome').textContent = '';
+  document.getElementById('paciente-laboratorio-texto').value = '';
 }
 
 function analisaAbrirResultados() {
