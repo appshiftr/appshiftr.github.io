@@ -23,7 +23,7 @@ export default async function handler(req, res) {
 
   try {
     // Extrair dados do request
-    const { imagemBase64, laboratorioBase64, tipo, queixa, sintomas, medicamentos, historico } = req.body;
+    const { imagemBase64, laboratorioBase64, laboratorioTexto, tipo, queixa, sintomas, sinaisVitais, medicamentos, historico } = req.body;
 
     // Validar campos obrigatórios
     if (!imagemBase64 || !tipo) {
@@ -53,6 +53,8 @@ export default async function handler(req, res) {
 
     const conteudo = [];
 
+    const temLaboratorio = !!(laboratorioBase64 || laboratorioTexto);
+
     // Adicionar texto inicial
     conteudo.push({
       type: 'text',
@@ -63,8 +65,10 @@ DADOS DO PACIENTE:
 - Tipo de exame: ${tipo}
 - Queixa principal: ${queixa || 'Não informada'}
 - Sintomas: ${sintomas || 'Não informados'}
+- Sinais vitais / triagem (enfermagem): ${sinaisVitais || 'Não informados'}
 - Medicamentos em uso: ${medicamentos || 'Não informados'}
 - Histórico: ${historico || 'Não informado'}
+${laboratorioTexto ? `- Resultado de laboratório (informado em texto): ${laboratorioTexto}` : ''}
 
 Por favor, forneça um laudo estruturado com:
 1. DADOS DO EXAME
@@ -75,7 +79,35 @@ Por favor, forneça um laudo estruturado com:
 6. RECOMENDAÇÕES CLÍNICAS
 7. OBSERVAÇÕES FINAIS
 
-Seja preciso, técnico e apropriado para um médico.`
+Seja preciso, técnico e apropriado para um médico nas seções 1 a 7 acima.
+
+Depois da seção 7, inclua uma seção adicional, EXATAMENTE com este título em uma linha própria:
+RESUMO PARA PRONTUÁRIO:
+${temLaboratorio ? `
+Nessa seção, primeiro transcreva um resumo ABREVIADO dos exames de laboratório fornecidos (imagem e/ou texto), EXATAMENTE neste formato — agrupado por categoria, sigla: valor separados por " | ", uma linha por categoria, linha em branco entre categorias, SEM nenhuma observação ou interpretação clínica nesse bloco:
+
+HEMOGRAMA:
+HEM: 4,82 | HB: 14,1 g/dL | HT: 43,0% | VCM: 89,2 fL | HCM: 29,3 pg | CHCM: 32,8 g/dL | RDW: 13,2%
+
+LEUCOGRAMA:
+LEUCO: 15.720/mm³ | BAST: 0% | SEG: 92% | EOS: 0% | BAS: 0% | LINF: 4% | MONO: 4%
+
+PLAQ: 194.000/mm³
+
+FUNÇÃO RENAL:
+UR: 47 mg/dL | CR: 0,93 mg/dL | TFGe: 82 mL/min/1,73m²
+
+ELETRÓLITOS:
+Na: 134 mEq/L | K: 5,3 mEq/L
+
+(O exemplo acima é só pra você entender o FORMATO — use as categorias e abreviações que realmente aparecem no exame fornecido, que pode ser hemograma, bioquímica, gasometria, coagulograma, urina, etc. Não invente valores nem categorias que não foram informados.)
+
+Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva`} um resumo clínico curto (de 3 a 5 frases), em linguagem direta e natural, do jeito que um médico escreveria à mão num prontuário. Regras importantes pra essa parte:
+- NÃO use markdown (sem **, sem #, sem listas com hífen)
+- NÃO use títulos em negrito ou numeração
+- Apenas texto corrido, em parágrafo único
+- Contenha só o essencial: achado principal, impressão diagnóstica e conduta/recomendação
+- Deve estar pronto pra ser copiado e colado direto no sistema de prontuário eletrônico, sem precisar editar nada`
     });
 
     // Adicionar imagem principal (obrigatória)
@@ -112,7 +144,7 @@ Seja preciso, técnico e apropriado para um médico.`
     console.log('📤 Chamando Claude Vision API...');
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
+      max_tokens: 2000,
       messages: [
         {
           role: 'user',

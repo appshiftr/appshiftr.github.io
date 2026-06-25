@@ -928,6 +928,24 @@ textarea.analise-form-control {
   border-color: var(--accent);
   color: var(--text);
 }
+
+/* ✅ Impressão do laudo SEM abrir janela separada — no celular, abrir uma
+   segunda janela/aba a partir do PWA podia fazer o sistema descartar a
+   aba original por falta de memória, perdendo o resultado da análise
+   (que custou dinheiro) e exigindo gerar tudo de novo. */
+@media print {
+  body * { display: none !important; }
+  #analise-print-area, #analise-print-area * { display: block !important; }
+  #analise-print-area {
+    position: absolute; top: 0; left: 0; width: 100%;
+    font-family: 'Courier New', monospace; font-size: 11px; color: #333; line-height: 1.8;
+  }
+  #analise-print-area pre { white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', monospace; }
+  #analise-print-area .ap-header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #0f0f11; padding-bottom: 20px; }
+  #analise-print-area .ap-header h1 { color: #0f0f11; }
+  #analise-print-area .ap-aviso { background: #fffacd; padding: 10px; border-left: 4px solid #ffc107; margin: 20px 0; font-size: 10px; }
+  #analise-print-area .ap-footer { margin-top: 60px; border-top: 1px solid #999; padding-top: 20px; font-size: 10px; color: #666; text-align: center; }
+}
 </style>
 </head>
 <body>
@@ -963,6 +981,7 @@ textarea.analise-form-control {
 </div>
 
 <!-- TOAST DE ATUALIZAÇÃO -->
+<div id="analise-print-area" style="display:none;"></div>
 <div id="toast-update" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9998;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;box-shadow:var(--shadow-lg);align-items:center;gap:12px;font-family:var(--mono);font-size:11px;color:var(--text);white-space:nowrap;">
   <span>🔄 Atualizando para a versão mais nova...</span>
 </div>
@@ -1484,6 +1503,29 @@ textarea.analise-form-control {
           ></textarea>
         </div>
 
+        <!-- SINAIS VITAIS / TRIAGEM DE ENFERMAGEM -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Sinais Vitais / Triagem (Enfermagem):
+          </label>
+          <textarea 
+            id="paciente-sinais-vitais" 
+            placeholder="Ex: PA 130x80mmHg, FC 88bpm, Dextro 110mg/dL, SatO2 97%, Temp 36.5°C"
+            style="
+              width:100%;
+              padding:0.8rem;
+              border-radius:0.5rem;
+              border:2px solid var(--border);
+              background:var(--surface2);
+              color:var(--text);
+              font-size:14px;
+              font-family:inherit;
+              min-height:60px;
+              resize:vertical;
+            "
+          ></textarea>
+        </div>
+
         <!-- MEDICAMENTOS -->
         <div style="margin-bottom:1.5rem;">
           <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
@@ -1558,6 +1600,29 @@ textarea.analise-form-control {
           </div>
           <input type="file" id="laboratorio-file-input" accept="image/*,.pdf" style="display:none;" onchange="analisaUploadLaboratorio(event)">
         </div>
+
+        <!-- TEXTO DE LABORATÓRIO (quando não tem PDF/imagem) -->
+        <div style="margin-bottom:1.5rem;">
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">
+            Ou cole/digite o resultado do exame (texto):
+          </label>
+          <textarea 
+            id="paciente-laboratorio-texto" 
+            placeholder="Ex: Hb 13.2, Leucócitos 9800, PCR 12, Ureia 38, Creatinina 0.9..."
+            style="
+              width:100%;
+              padding:0.8rem;
+              border-radius:0.5rem;
+              border:2px solid var(--border);
+              background:var(--surface2);
+              color:var(--text);
+              font-size:14px;
+              font-family:inherit;
+              min-height:70px;
+              resize:vertical;
+            "
+          ></textarea>
+        </div>
       </div>
 
       <!-- ETAPA 2: Preview -->
@@ -1566,6 +1631,9 @@ textarea.analise-form-control {
           <div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.5rem;">Imagem carregada</div>
         </div>
         <div class="analise-preview" id="analise-preview"></div>
+        <button class="analise-btn analise-btn-secondary" onclick="analisaGirarImagem()" style="margin-bottom:0.6rem;">
+          🔄 Girar imagem
+        </button>
         <button class="analise-btn" onclick="analisaProcessar()">
           🔍 Analisar com IA
         </button>
@@ -4526,6 +4594,7 @@ let analisaImagemAtual = null;
 let analisaTipoExameSelecionado = null; // ✅ Tipo selecionado
 let analisaResultadosAtual = [];
 let analisaLaboratorioBase64 = null; // ✅ NOVO: Arquivo de laboratório
+let analisaResumoProntuarioAtual = ''; // ✅ NOVO: Resumo simplificado pra copiar no prontuário
 let analisaPaciente = {  // ✅ NOVO: Dados do paciente
   queixa: '',
   sintomas: '',
@@ -4887,30 +4956,65 @@ async function analisarRX(canvas) {
 // ✅ NOVO: Redimensiona a imagem no navegador antes de enviar (máx 1568px,
 // que é o próprio limite ideal da Claude — evita erro 500 por imagem grande
 // demais pro Vercel/Anthropic aceitar, e ainda deixa a análise mais rápida)
-function redimensionarImagem(file, maxDim = 1568, qualidade = 0.85) {
+async function redimensionarImagem(file, maxDim = 1568, qualidade = 0.85) {
+  function desenharEExportar(source, larguraOriginal, alturaOriginal) {
+    let width = larguraOriginal, height = alturaOriginal;
+    if (width > maxDim || height > maxDim) {
+      const escala = Math.min(maxDim / width, maxDim / height);
+      width = Math.round(width * escala);
+      height = Math.round(height * escala);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(source, 0, 0, width, height);
+    return canvas.toDataURL('image/jpeg', qualidade);
+  }
+
+  // ✅ createImageBitmap com imageOrientation:'from-image' aplica a rotação
+  // EXIF da câmera automaticamente — sem isso, fotos que aparecem certas na
+  // galeria do celular podiam sair tortas/de lado depois de processadas
+  // (causa comum de ECG "em pé" na análise).
+  if (window.createImageBitmap) {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      return desenharEExportar(bitmap, bitmap.width, bitmap.height);
+    } catch (e) {
+      // segue pro fallback abaixo
+    }
+  }
+
+  // Fallback (navegadores sem suporte à opção imageOrientation)
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const escala = Math.min(maxDim / width, maxDim / height);
-          width = Math.round(width * escala);
-          height = Math.round(height * escala);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', qualidade));
-      };
+      img.onload = () => resolve(desenharEExportar(img, img.width, img.height));
       img.onerror = () => reject(new Error('Não foi possível abrir essa imagem.'));
       img.src = ev.target.result;
     };
     reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
     reader.readAsDataURL(file);
   });
+}
+
+// ✅ NOVO: Gira a imagem 90° no botão "Girar" da pré-visualização — pro
+// médico corrigir ECG/RX fotografado na orientação errada antes de analisar
+function analisaGirarImagem() {
+  if (!analisaImagemAtual) return;
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.height;
+    canvas.height = img.width;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(90 * Math.PI / 180);
+    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    analisaImagemAtual = canvas.toDataURL('image/jpeg', 0.9);
+    document.getElementById('analise-preview').innerHTML = `<img src="${analisaImagemAtual}">`;
+  };
+  img.src = analisaImagemAtual;
 }
 
 function analisaUploadLaboratorio(e) {
@@ -4954,8 +5058,10 @@ function analisaUploadFile(e) {
   analisaPaciente = {
     queixa: document.getElementById('paciente-queixa')?.value || '',
     sintomas: document.getElementById('paciente-sintomas')?.value || '',
+    sinaisVitais: document.getElementById('paciente-sinais-vitais')?.value || '',
     medicamentos: document.getElementById('paciente-medicamentos')?.value || '',
-    historico: document.getElementById('paciente-historico')?.value || ''
+    historico: document.getElementById('paciente-historico')?.value || '',
+    laboratorioTexto: document.getElementById('paciente-laboratorio-texto')?.value || ''
   };
 
   redimensionarImagem(file)
@@ -5008,9 +5114,11 @@ async function analisaProcessar() {
       body: JSON.stringify({
         imagemBase64: imagemSemPrefix,
         laboratorioBase64: laboratorioSemPrefix,
+        laboratorioTexto: analisaPaciente.laboratorioTexto,
         tipo: tipoExame,
         queixa: analisaPaciente.queixa,
         sintomas: analisaPaciente.sintomas,
+        sinaisVitais: analisaPaciente.sinaisVitais,
         medicamentos: analisaPaciente.medicamentos,
         historico: analisaPaciente.historico
       })
@@ -5095,11 +5203,36 @@ async function analisaAtualizarSaldo() {
   }
 }
 
+function analisaCopiarResumo() {
+  if (!analisaResumoProntuarioAtual) return;
+  const btn = document.getElementById('analise-btn-copiar-resumo');
+  navigator.clipboard.writeText(analisaResumoProntuarioAtual).then(() => {
+    if (btn) {
+      const textoOriginal = btn.textContent;
+      btn.textContent = '✅ Copiado!';
+      setTimeout(() => { btn.textContent = textoOriginal; }, 2000);
+    }
+  }).catch(() => {
+    alert('Não foi possível copiar automaticamente. Selecione o texto manualmente.');
+  });
+}
+
 function analisaMostrarResultados() {
   const lista = document.getElementById('analise-resultados-lista');
   
   // ✅ Se for laudo completo do Claude
   if (analisaResultadosAtual[0]?.tipo === 'laudo_completo') {
+    // Separa a seção "RESUMO PARA PRONTUÁRIO:" do resto do laudo, se existir
+    const conteudoCompleto = analisaResultadosAtual[0].conteudo || '';
+    const marcador = 'RESUMO PARA PRONTUÁRIO:';
+    const idxMarcador = conteudoCompleto.indexOf(marcador);
+    let laudoPrincipal = conteudoCompleto;
+    analisaResumoProntuarioAtual = '';
+    if (idxMarcador !== -1) {
+      laudoPrincipal = conteudoCompleto.slice(0, idxMarcador).trim();
+      analisaResumoProntuarioAtual = conteudoCompleto.slice(idxMarcador + marcador.length).trim();
+    }
+
     lista.innerHTML = `
       <div style="
         background:var(--surface2);
@@ -5115,8 +5248,15 @@ function analisaMostrarResultados() {
         max-height:600px;
         overflow-y:auto;
       ">
-${analisaResultadosAtual[0].conteudo}
+${laudoPrincipal}
       </div>
+      ${analisaResumoProntuarioAtual ? `
+      <div style="margin-top:1rem;padding:1rem;background:var(--surface2);border:2px solid var(--accent);border-radius:0.5rem;">
+        <div style="font-size:11px;font-weight:600;color:var(--accent2);text-transform:uppercase;margin-bottom:0.5rem;">📋 Resumo para prontuário</div>
+        <div style="color:var(--text);font-size:13px;line-height:1.6;margin-bottom:0.8rem;white-space:pre-wrap;font-family:'Courier New', monospace;">${analisaResumoProntuarioAtual}</div>
+        <button class="analise-btn analise-btn-secondary" onclick="analisaCopiarResumo()" style="width:auto;padding:0.5rem 1rem;font-size:12px;" id="analise-btn-copiar-resumo">📄 Copiar resumo</button>
+      </div>
+      ` : ''}
       <div style="margin-top:1rem;padding:1rem;background:var(--surface3);border-radius:0.5rem;font-size:11px;color:var(--text3);">
         ⚠️ Este laudo foi gerado com análise de IA Claude Vision. Análise clínica profissional é necessária para conclusão diagnóstica.
       </div>
@@ -5156,67 +5296,23 @@ function analisaImprimirLaudo() {
     return;
   }
 
-  const janela = window.open('', '', 'height=700,width=900');
-  janela.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Laudo Médico</title>
-      <style>
-        body { 
-          font-family: 'Courier New', monospace; 
-          margin: 40px; 
-          line-height: 1.8;
-          font-size: 11px;
-          color: #333;
-        }
-        h1 { color: #0f0f11; text-align: center; }
-        .header { 
-          text-align: center; 
-          margin-bottom: 40px;
-          border-bottom: 2px solid #0f0f11;
-          padding-bottom: 20px;
-        }
-        .footer { 
-          margin-top: 60px; 
-          border-top: 1px solid #999; 
-          padding-top: 20px; 
-          font-size: 10px; 
-          color: #666; 
-          text-align: center;
-        }
-        .aviso {
-          background: #fffacd;
-          padding: 10px;
-          border-left: 4px solid #ffc107;
-          margin: 20px 0;
-          font-size: 10px;
-        }
-        pre { 
-          white-space: pre-wrap; 
-          word-wrap: break-word;
-          font-family: 'Courier New', monospace;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>SHIFTR - LAUDO MÉDICO</h1>
-        <p>Data: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}</p>
-      </div>
-      <pre>${analisaResultadosAtual[0].conteudo}</pre>
-      <div class="aviso">
-        ⚠️ Este laudo foi gerado com análise de IA Claude Vision. Análise clínica profissional é necessária para conclusão diagnóstica.
-      </div>
-      <div class="footer">
-        <p>Sistema Shiftr - Análise Médica com IA</p>
-        <p>Documento gerado automaticamente</p>
-      </div>
-    </body>
-    </html>
-  `);
-  janela.document.close();
-  setTimeout(() => janela.print(), 500);
+  const area = document.getElementById('analise-print-area');
+  area.innerHTML = `
+    <div class="ap-header">
+      <h1>SHIFTR - LAUDO MÉDICO</h1>
+      <p>Data: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}</p>
+    </div>
+    <pre>${analisaResultadosAtual[0].conteudo}</pre>
+    <div class="ap-aviso">
+      ⚠️ Este laudo foi gerado com análise de IA Claude Vision. Análise clínica profissional é necessária para conclusão diagnóstica.
+    </div>
+    <div class="ap-footer">
+      <p>Sistema Shiftr - Análise Médica com IA</p>
+      <p>Documento gerado automaticamente</p>
+    </div>
+  `;
+
+  window.print();
 }
 
 function analisaGerarLaudo() {
