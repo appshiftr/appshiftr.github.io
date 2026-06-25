@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
-// SERVICE WORKER v8 - FORÇA ATUALIZAÇÃO (NÃO FICA CONGELADO!)
+// SERVICE WORKER v9 - FORÇA ATUALIZAÇÃO (NÃO FICA CONGELADO!)
 // ═══════════════════════════════════════════════════════════════
 
-const CACHE_NAME = 'shiftr-v8';
-const CACHE_VERSAO = 'v8-' + new Date().getTime(); // Força nova versão
+const CACHE_NAME = 'shiftr-v9';
+const CACHE_VERSAO = 'v9-' + new Date().getTime(); // Força nova versão
 
 // Assets essenciais - APENAS arquivos que realmente existem
 const ASSETS = [
@@ -26,7 +26,7 @@ const EXTERNAL_ASSETS = [
 // ═══════════════════════════════════════════════════════════════
 
 self.addEventListener('install', event => {
-  console.log('🔧 [SW v8] Install iniciado...');
+  console.log('🔧 [SW v9] Install iniciado...');
   
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
@@ -43,7 +43,7 @@ self.addEventListener('install', event => {
         )
       );
     }).then(() => {
-      console.log('✅ [SW v8] Assets cacheados com sucesso');
+      console.log('✅ [SW v9] Assets cacheados com sucesso');
       self.skipWaiting(); // Ativa imediatamente
     })
   );
@@ -54,7 +54,7 @@ self.addEventListener('install', event => {
 // ═══════════════════════════════════════════════════════════════
 
 self.addEventListener('activate', event => {
-  console.log('🗑️  [SW v8] Limpando caches antigos...');
+  console.log('🗑️  [SW v9] Limpando caches antigos...');
   
   event.waitUntil(
     caches.keys().then(cacheNames => {
@@ -67,7 +67,7 @@ self.addEventListener('activate', event => {
         })
       );
     }).then(() => {
-      console.log('✅ [SW v8] Caches antigos removidos');
+      console.log('✅ [SW v9] Caches antigos removidos');
       // Notifica todas as abas pra recarregar
       return self.clients.matchAll();
     }).then(clients => {
@@ -103,7 +103,7 @@ self.addEventListener('fetch', event => {
   // pra não capturar fetch() de API por engano.
   if (request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname === '/') {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: 'no-store' }) // ✅ ignora o cache de 10min do GitHub Pages, sempre busca fresco
         .then(response => {
           // Se conseguiu, atualiza cache
           if (response.ok) {
@@ -168,4 +168,4 @@ self.addEventListener('message', event => {
   }
 });
 
-console.log('✅ [SW v8] Service Worker carregado com force update!');
+console.log('✅ [SW v9] Service Worker carregado com force update!');
