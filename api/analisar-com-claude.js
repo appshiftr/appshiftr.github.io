@@ -145,7 +145,9 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
     if (laboratorioBase64) {
       conteudo.push({
         type: 'text',
-        text: 'Aqui está também a imagem de laboratório/exames complementares:'
+        text: temImagem
+          ? 'Aqui está também a imagem de laboratório/exames complementares:'
+          : 'Aqui está a imagem do exame de laboratório:'
       });
       
       conteudo.push({
