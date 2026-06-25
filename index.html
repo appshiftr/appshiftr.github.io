@@ -5046,9 +5046,20 @@ async function analisaProcessar() {
 }
 
 // ✅ NOVO: Mostra quantos créditos o usuário tem disponíveis na Análise IA
+// 🔒 Sistema de créditos ainda não publicado (Firestore rule + backend pausados
+// de propósito, fase de estabilização). Quando for ativar: troque pra `true`
+// e publique a regra do /creditos no Firestore — não precisa mudar mais nada.
+const CREDITOS_ATIVO = false;
+
 async function analisaAtualizarSaldo() {
+  const caixaSaldo = document.getElementById('analise-saldo-creditos');
   const elSaldo = document.getElementById('analise-saldo-valor');
   if (!elSaldo) return;
+
+  if (!CREDITOS_ATIVO) {
+    if (caixaSaldo) caixaSaldo.style.display = 'none';
+    return;
+  }
 
   const { db, doc, getDoc } = window._fb;
   if (!_currentUser) { elSaldo.textContent = '—'; return; }
