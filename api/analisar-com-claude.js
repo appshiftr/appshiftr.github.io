@@ -26,9 +26,11 @@ export default async function handler(req, res) {
     const { imagemBase64, laboratorioBase64, laboratorioTexto, tipo, queixa, sintomas, sinaisVitais, medicamentos, historico } = req.body;
 
     // Validar campos obrigatórios
-    if (!imagemBase64 || !tipo) {
+    // ✅ Imagem principal agora é OPCIONAL — permite análise só com dados
+    // de laboratório (paciente sem ECG/RX, só precisa interpretar exames)
+    if ((!imagemBase64 && !laboratorioBase64 && !laboratorioTexto) || !tipo) {
       return res.status(400).json({ 
-        erro: 'Campos obrigatórios faltando: imagemBase64, tipo' 
+        erro: 'Informe ao menos uma imagem de exame OU dados de laboratório, além do tipo de exame.' 
       });
     }
 
@@ -53,13 +55,36 @@ export default async function handler(req, res) {
 
     const conteudo = [];
 
+    const temImagem = !!imagemBase64;
     const temLaboratorio = !!(laboratorioBase64 || laboratorioTexto);
+
+    const introducao = temImagem
+      ? `Você é um radiologista especializado em análise de imagens médicas. 
+Analise a imagem enviada e forneça um laudo detalhado.`
+      : `Você é um médico especializado em interpretação de exames de laboratório.
+Não há imagem de ECG/Raio-X neste caso — analise apenas os dados clínicos e os exames de laboratório fornecidos abaixo.`;
+
+    const estruturaSecoes = temImagem
+      ? `1. DADOS DO EXAME
+2. ACHADOS PRINCIPAIS
+3. ACHADOS LABORATORIAIS (se aplicável)
+4. ACHADOS CORRELACIONADOS
+5. IMPRESSÃO DIAGNÓSTICA
+6. RECOMENDAÇÕES CLÍNICAS
+7. OBSERVAÇÕES FINAIS`
+      : `1. DADOS CLÍNICOS
+2. INTERPRETAÇÃO DOS EXAMES LABORATORIAIS
+3. CORRELAÇÃO CLÍNICA
+4. IMPRESSÃO DIAGNÓSTICA
+5. RECOMENDAÇÕES CLÍNICAS
+6. OBSERVAÇÕES FINAIS`;
+
+    const numUltimaSecao = temImagem ? 7 : 6;
 
     // Adicionar texto inicial
     conteudo.push({
       type: 'text',
-      text: `Você é um radiologista especializado em análise de imagens médicas. 
-Analise a imagem enviada e forneça um laudo detalhado.
+      text: `${introducao}
 
 DADOS DO PACIENTE:
 - Tipo de exame: ${tipo}
@@ -71,17 +96,11 @@ DADOS DO PACIENTE:
 ${laboratorioTexto ? `- Resultado de laboratório (informado em texto): ${laboratorioTexto}` : ''}
 
 Por favor, forneça um laudo estruturado com:
-1. DADOS DO EXAME
-2. ACHADOS PRINCIPAIS
-3. ACHADOS LABORATORIAIS (se aplicável)
-4. ACHADOS CORRELACIONADOS
-5. IMPRESSÃO DIAGNÓSTICA
-6. RECOMENDAÇÕES CLÍNICAS
-7. OBSERVAÇÕES FINAIS
+${estruturaSecoes}
 
-Seja preciso, técnico e apropriado para um médico nas seções 1 a 7 acima.
+Seja preciso, técnico e apropriado para um médico nas seções 1 a ${numUltimaSecao} acima.
 
-Depois da seção 7, inclua uma seção adicional, EXATAMENTE com este título em uma linha própria:
+Depois da seção ${numUltimaSecao}, inclua uma seção adicional, EXATAMENTE com este título em uma linha própria:
 RESUMO PARA PRONTUÁRIO:
 ${temLaboratorio ? `
 Nessa seção, primeiro transcreva um resumo ABREVIADO dos exames de laboratório fornecidos (imagem e/ou texto), EXATAMENTE neste formato — agrupado por categoria, sigla: valor separados por " | ", uma linha por categoria, linha em branco entre categorias, SEM nenhuma observação ou interpretação clínica nesse bloco:
@@ -110,15 +129,17 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
 - Deve estar pronto pra ser copiado e colado direto no sistema de prontuário eletrônico, sem precisar editar nada`
     });
 
-    // Adicionar imagem principal (obrigatória)
-    conteudo.push({
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: 'image/jpeg',
-        data: imagemBase64
-      }
-    });
+    // Adicionar imagem principal (agora opcional)
+    if (temImagem) {
+      conteudo.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: imagemBase64
+        }
+      });
+    }
 
     // Adicionar imagem de laboratório (opcional)
     if (laboratorioBase64) {

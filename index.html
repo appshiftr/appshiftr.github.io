@@ -1456,6 +1456,7 @@ textarea.analise-form-control {
             <option value="" style="background:#212127;color:#f0eff5;">-- Selecione o tipo --</option>
             <option value="ECG" style="background:#212127;color:#f0eff5;">ECG (Eletrocardiograma)</option>
             <option value="RX" style="background:#212127;color:#f0eff5;">Raio-X (Radiografia)</option>
+            <option value="LABORATORIO" style="background:#212127;color:#f0eff5;">Apenas Laboratório (sem imagem)</option>
           </select>
         </div>
 
@@ -1618,11 +1619,16 @@ textarea.analise-form-control {
               color:var(--text);
               font-size:14px;
               font-family:inherit;
-              min-height:70px;
+              min-height:180px;
               resize:vertical;
             "
           ></textarea>
         </div>
+
+        <!-- ANALISAR SEM IMAGEM (só com texto/laboratório) -->
+        <button class="analise-btn analise-btn-secondary" onclick="analisaIniciarSemImagem()" style="margin-top:0.5rem;">
+          🔍 Analisar sem imagem (só com os dados acima)
+        </button>
       </div>
 
       <!-- ETAPA 2: Preview -->
@@ -5077,12 +5083,44 @@ function analisaUploadFile(e) {
     });
 }
 
+// ✅ NOVO: Analisar só com dados de laboratório, sem imagem de ECG/RX —
+// pra paciente que só precisa de interpretação de exame, sem ECG/RX feito
+function analisaIniciarSemImagem() {
+  const tipoExame = document.getElementById('tipoExameSelecionado').value;
+  if (!tipoExame) {
+    alert('⚠️ Por favor, selecione o tipo de exame antes de analisar.');
+    return;
+  }
+
+  const laboratorioTexto = document.getElementById('paciente-laboratorio-texto')?.value?.trim() || '';
+  if (!laboratorioTexto && !analisaLaboratorioBase64) {
+    alert('⚠️ Anexe um arquivo de laboratório ou cole/digite o resultado no campo de texto antes de analisar sem imagem.');
+    return;
+  }
+
+  analisaPaciente = {
+    queixa: document.getElementById('paciente-queixa')?.value || '',
+    sintomas: document.getElementById('paciente-sintomas')?.value || '',
+    sinaisVitais: document.getElementById('paciente-sinais-vitais')?.value || '',
+    medicamentos: document.getElementById('paciente-medicamentos')?.value || '',
+    historico: document.getElementById('paciente-historico')?.value || '',
+    laboratorioTexto
+  };
+
+  analisaImagemAtual = null; // sem imagem principal nesse fluxo
+  analisaTipoExameSelecionado = tipoExame;
+  analisaProcessar();
+}
+
 async function analisaProcessar() {
   analisaMostrarEtapa('processing');
-  
-  if (!analisaImagemAtual) {
-    alert('Erro: imagem não carregada');
-    analisaMostrarEtapa('preview');
+
+  const temLaboratorio = !!(analisaLaboratorioBase64 || document.getElementById('paciente-laboratorio-texto')?.value?.trim());
+  const etapaVolta = analisaImagemAtual ? 'preview' : 'upload';
+
+  if (!analisaImagemAtual && !temLaboratorio) {
+    alert('Envie uma imagem de exame OU informe dados de laboratório (arquivo ou texto) pra poder analisar.');
+    analisaMostrarEtapa(etapaVolta);
     return;
   }
 
@@ -5090,14 +5128,14 @@ async function analisaProcessar() {
   const usuario = auth.currentUser;
   if (!usuario) {
     alert('Sua sessão expirou. Faça login novamente para usar a Análise IA.');
-    analisaMostrarEtapa('preview');
+    analisaMostrarEtapa(etapaVolta);
     return;
   }
   
   const tipoExame = analisaTipoExameSelecionado || document.getElementById('tipoExameSelecionado').value;
   
   try {
-    const imagemSemPrefix = analisaImagemAtual.split(',')[1]; // Remove "data:image/jpeg;base64,"
+    const imagemSemPrefix = analisaImagemAtual ? analisaImagemAtual.split(',')[1] : null; // Remove "data:image/jpeg;base64,"
     const laboratorioSemPrefix = analisaLaboratorioBase64 ? analisaLaboratorioBase64.split(',')[1] : null;
 
     // ✅ Só manda o token quando o backend de créditos estiver de fato
