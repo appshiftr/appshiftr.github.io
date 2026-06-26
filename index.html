@@ -110,6 +110,13 @@ window._fbReady = true;
 window.dispatchEvent(new Event('fb-ready'));
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  // ✅ NOVO: pdf.js pra extrair texto de PDFs de laboratório (mais barato que mandar o PDF inteiro pra Claude)
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2"></script>
 <style>
@@ -5198,19 +5205,69 @@ function analisaGirarImagem() {
   img.src = analisaImagemAtual;
 }
 
+// ✅ NOVO: Extrai texto de um PDF respeitando a posição visual (linha por linha,
+// ordenado por X dentro de cada linha) — testado e confirmado que resolve o
+// problema de colunas embaralhadas em tabelas de laboratório (ex: hemograma
+// com % numa coluna e valor absoluto noutra).
+async function extrairTextoPDF(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let textoCompleto = '';
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+
+    const itens = textContent.items
+      .filter(item => item.str.trim() !== '')
+      .map(item => ({ texto: item.str, x: item.transform[4], y: item.transform[5] }));
+
+    // Agrupa itens na mesma linha visual (Y parecido, tolerância de 3px)
+    const linhas = [];
+    itens.forEach(item => {
+      let linha = linhas.find(l => Math.abs(l.y - item.y) < 3);
+      if (!linha) { linha = { y: item.y, itens: [] }; linhas.push(linha); }
+      linha.itens.push(item);
+    });
+
+    // De cima pra baixo (Y maior = mais acima no PDF); dentro da linha, esquerda pra direita
+    linhas.sort((a, b) => b.y - a.y);
+    linhas.forEach(l => l.itens.sort((a, b) => a.x - b.x));
+
+    textoCompleto += linhas.map(l => l.itens.map(i => i.texto).join('  ')).join('\n') + '\n\n';
+  }
+
+  return textoCompleto.trim();
+}
+
 function analisaUploadLaboratorio(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  // PDFs não passam por redimensionamento de imagem
   if (file.type === 'application/pdf') {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      analisaLaboratorioBase64 = ev.target.result;
-      analisaLaboratorioMimeType = 'application/pdf';
-      document.getElementById('laboratorio-nome').textContent = `✓ ${file.name}`;
-    };
-    reader.readAsDataURL(file);
+    extrairTextoPDF(file)
+      .then(texto => {
+        if (texto && texto.length > 30) {
+          // ✅ Extração funcionou — usa texto (muito mais barato que mandar o PDF inteiro)
+          document.getElementById('paciente-laboratorio-texto').value = texto;
+          analisaLaboratorioBase64 = null;
+          analisaLaboratorioMimeType = null;
+          document.getElementById('laboratorio-nome').textContent = `✓ ${file.name} (texto extraído — revise abaixo se quiser)`;
+        } else {
+          throw new Error('Extração vazia');
+        }
+      })
+      .catch(err => {
+        // PDF escaneado/sem camada de texto — manda o arquivo original (mais caro, mas funciona)
+        console.warn('Não foi possível extrair texto do PDF, enviando arquivo original:', err);
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          analisaLaboratorioBase64 = ev.target.result;
+          analisaLaboratorioMimeType = 'application/pdf';
+          document.getElementById('laboratorio-nome').textContent = `✓ ${file.name} (PDF sem texto — enviado como documento)`;
+        };
+        reader.readAsDataURL(file);
+      });
     return;
   }
 
