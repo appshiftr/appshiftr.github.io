@@ -1770,6 +1770,27 @@ function logErro(contexto, erro, extra = {}) {
   }
 }
 
+// ✅ NOVO: Registra o custo real (tokens) de cada análise no Firestore —
+// constrói histórico automático pra análise de viabilidade de preço
+function logCusto(tokens, contexto, extra = {}){
+  try {
+    const { db, collection, doc, setDoc } = window._fb || {};
+    if (!db || !tokens) return;
+    const ref = doc(collection(db, 'logs_custos'));
+    setDoc(ref, {
+      contexto,
+      modelo: 'claude-sonnet-4-6',
+      tokensInput: tokens.input || null,
+      tokensOutput: tokens.output || null,
+      uid: (window._fb?.auth?.currentUser?.uid) || null,
+      timestamp: new Date().toISOString(),
+      extra
+    }).catch(() => {});
+  } catch (e) {
+    // nunca deixa o log de custo causar outro erro
+  }
+}
+
 // Pega qualquer erro de JS não tratado em qualquer lugar do app
 window.addEventListener('error', (event) => {
   logErro('erro_global', event.error || new Error(event.message));
@@ -5340,6 +5361,15 @@ async function analisaProcessar() {
     if (dados.truncado) {
       console.warn('⚠️ Laudo retornado incompleto (cortado por limite de tokens)');
     }
+
+    // ✅ Registra o custo real dessa análise — vira histórico pra decisão de preço
+    logCusto(dados.tokens, 'analise_ia', {
+      tipoExame,
+      teveImagem: !!analisaImagemAtual,
+      teveLaboratorioArquivo: !!analisaLaboratorioBase64,
+      laboratorioMimeType: analisaLaboratorioMimeType,
+      teveLaboratorioTexto: !!document.getElementById('paciente-laboratorio-texto')?.value?.trim()
+    });
 
     // Atualiza o saldo exibido com o valor que o servidor confirmou
     if (typeof dados.saldo === 'number') {
