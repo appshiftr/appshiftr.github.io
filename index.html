@@ -689,6 +689,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   padding:32px 24px;
 }
 #login-screen.visible{display:flex;}
+#pin-screen{
+  display:none;position:fixed;inset:0;z-index:9999;
+  background:var(--bg);
+  flex-direction:column;align-items:center;justify-content:center;
+  padding:32px 24px;
+}
+#pin-screen.visible{display:flex;}
 .login-card{
   width:100%;max-width:380px;
   background:var(--surface);
@@ -971,6 +978,29 @@ textarea.analise-form-control {
     </div>
     <div class="login-error" id="login-error"></div>
     <div class="login-footer">Seus dados são privados e criptografados.<br>Apenas você tem acesso às suas informações.</div>
+  </div>
+</div>
+
+<!-- TELA DE PIN -->
+<div id="pin-screen">
+  <div class="login-card">
+    <div class="login-logo">🔒</div>
+    <div class="login-title" id="pin-titulo">Digite seu PIN</div>
+    <div class="login-sub" id="pin-subtitulo">Confirme sua identidade pra continuar.</div>
+
+    <input type="password" id="pin-input-1" inputmode="numeric" maxlength="6" placeholder="PIN (4 a 6 dígitos)" onkeydown="if(event.key==='Enter')confirmarPin()"
+      style="width:100%;padding:14px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:18px;text-align:center;letter-spacing:6px;font-family:var(--mono);margin-bottom:12px;">
+
+    <input type="password" id="pin-input-2" inputmode="numeric" maxlength="6" placeholder="Confirme o PIN" onkeydown="if(event.key==='Enter')confirmarPin()"
+      style="display:none;width:100%;padding:14px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:18px;text-align:center;letter-spacing:6px;font-family:var(--mono);margin-bottom:12px;">
+
+    <button class="btn-google" onclick="confirmarPin()" id="pin-btn-confirmar" style="justify-content:center;">Confirmar</button>
+
+    <div class="login-error" id="pin-error" style="display:none;"></div>
+
+    <div class="login-footer">
+      <a href="#" onclick="cancelarPin(); return false;" style="color:var(--text3);">← Sair e usar outra conta</a>
+    </div>
   </div>
 </div>
 
@@ -1987,28 +2017,159 @@ function resetarTimerInatividade(){
   window.addEventListener(evt, resetarTimerInatividade, {passive:true});
 });
 
+// ✅ NOVO: Verifica se o email está na lista de acesso autorizado
+async function verificarAutorizacao(email){
+  try {
+    const { db, doc, getDoc } = window._fb;
+    const ref = doc(db, 'emails_autorizados', (email || '').toLowerCase());
+    const snap = await getDoc(ref);
+    return snap.exists();
+  } catch (e) {
+    console.error('Erro ao verificar autorização:', e);
+    return false; // por segurança, nega acesso se der qualquer erro
+  }
+}
+
+// ✅ NOVO: Sistema de PIN — protege contra alguém usar a sessão do Google
+// de outra pessoa em computador compartilhado (clicar no email cacheado).
+let _pinModo = null; // 'setup' ou 'verificar'
+let _pinUidAtual = null;
+let _pinUserPendente = null;
+let _pinTentativas = 0;
+
+async function hashPin(uid, pin){
+  const dados = new TextEncoder().encode(uid + ':' + pin);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', dados);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function mostrarTelaPin(modo){
+  _pinModo = modo;
+  document.getElementById('pin-input-1').value = '';
+  document.getElementById('pin-input-2').value = '';
+  document.getElementById('pin-error').style.display = 'none';
+  if (modo === 'setup') {
+    document.getElementById('pin-titulo').textContent = 'Configure seu PIN';
+    document.getElementById('pin-subtitulo').textContent = 'Crie um PIN de 4 a 6 dígitos pra proteger seu acesso, mesmo em computador compartilhado entre turnos.';
+    document.getElementById('pin-input-1').placeholder = 'Novo PIN (4 a 6 dígitos)';
+    document.getElementById('pin-input-2').style.display = 'block';
+  } else {
+    document.getElementById('pin-titulo').textContent = 'Digite seu PIN';
+    document.getElementById('pin-subtitulo').textContent = 'Confirme sua identidade pra continuar.';
+    document.getElementById('pin-input-1').placeholder = 'PIN (4 a 6 dígitos)';
+    document.getElementById('pin-input-2').style.display = 'none';
+  }
+  document.getElementById('pin-screen').classList.add('visible');
+  setTimeout(()=>document.getElementById('pin-input-1').focus(), 100);
+}
+
+function esconderTelaPin(){
+  document.getElementById('pin-screen').classList.remove('visible');
+}
+
+async function confirmarPin(){
+  const pin1 = document.getElementById('pin-input-1').value.trim();
+  const errorEl = document.getElementById('pin-error');
+  errorEl.style.display = 'none';
+
+  if (!/^\d{4,6}$/.test(pin1)) {
+    errorEl.textContent = 'O PIN deve ter de 4 a 6 números.';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  const { db, doc, setDoc, getDoc } = window._fb;
+
+  if (_pinModo === 'setup') {
+    const pin2 = document.getElementById('pin-input-2').value.trim();
+    if (pin1 !== pin2) {
+      errorEl.textContent = 'Os PINs não coincidem. Tente de novo.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    const hash = await hashPin(_pinUidAtual, pin1);
+    await setDoc(doc(db, 'usuarios', _pinUidAtual), { pinHash: hash }, { merge: true });
+    esconderTelaPin();
+    finalizarLoginAposPin();
+  } else {
+    const snap = await getDoc(doc(db, 'usuarios', _pinUidAtual));
+    const hashSalvo = snap.exists() ? snap.data().pinHash : null;
+    const hashDigitado = await hashPin(_pinUidAtual, pin1);
+    if (hashDigitado === hashSalvo) {
+      esconderTelaPin();
+      finalizarLoginAposPin();
+    } else {
+      _pinTentativas++;
+      if (_pinTentativas >= 5) {
+        errorEl.textContent = 'Muitas tentativas incorretas. Faça login novamente.';
+        errorEl.style.display = 'block';
+        setTimeout(async ()=>{
+          const {auth, signOut} = window._fb;
+          await signOut(auth);
+          esconderTelaPin();
+        }, 1500);
+      } else {
+        errorEl.textContent = 'PIN incorreto. Tente de novo.';
+        errorEl.style.display = 'block';
+      }
+    }
+  }
+}
+
+function cancelarPin(){
+  esconderTelaPin();
+  const { auth, signOut } = window._fb;
+  signOut(auth);
+}
+
+async function finalizarLoginAposPin(){
+  const user = _pinUserPendente;
+  if (!user) return;
+  _currentUser = user;
+  resetarTimerInatividade();
+  if(user.photoURL){
+    ['sb-avatar','tb-avatar'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el){ el.style.background=`url(${user.photoURL}) center/cover no-repeat`; el.textContent=''; el.classList.remove('sem-perfil'); }
+    });
+  }
+  if(!perfil.nome && user.displayName){ perfil.nome=user.displayName; perfil.email=user.email||''; }
+  await carregarDoFirestore(user.uid);
+}
+
 function initAuth(){
   if(!window._fbReady){ window.addEventListener('fb-ready', initAuth, {once:true}); return; }
-  const {auth, onAuthStateChanged, getRedirectResult} = window._fb;
+  const {auth, onAuthStateChanged, getRedirectResult, signOut} = window._fb;
   getRedirectResult(auth).catch(()=>{});
   onAuthStateChanged(auth, async user=>{
     if(user){
-      _currentUser = user;
-      document.getElementById('login-screen').classList.remove('visible');
-      resetarTimerInatividade(); // começa a contar a partir do login
-      // Avatar Google
-      if(user.photoURL){
-        ['sb-avatar','tb-avatar'].forEach(id=>{
-          const el=document.getElementById(id);
-          if(el){ el.style.background=`url(${user.photoURL}) center/cover no-repeat`; el.textContent=''; el.classList.remove('sem-perfil'); }
-        });
+      // 1. Bloqueia quem não está na lista de emails autorizados
+      const autorizado = await verificarAutorizacao(user.email);
+      if (!autorizado) {
+        await signOut(auth);
+        alert('⚠️ Acesso não autorizado.\n\nO email ' + user.email + ' ainda não foi liberado pelo administrador. Entre em contato pra solicitar acesso.');
+        return;
       }
-      if(!perfil.nome && user.displayName){ perfil.nome=user.displayName; perfil.email=user.email||''; }
-      await carregarDoFirestore(user.uid);
+
+      // 2. Verifica se já tem PIN configurado — se não tiver, pede pra criar;
+      // se já tiver, pede pra confirmar. Isso fecha a brecha de alguém usar
+      // a sessão Google de outra pessoa num computador compartilhado.
+      const { db, doc, getDoc } = window._fb;
+      const snap = await getDoc(doc(db, 'usuarios', user.uid));
+      const temPin = snap.exists() && !!snap.data().pinHash;
+
+      _pinUidAtual = user.uid;
+      _pinUserPendente = user;
+      _pinTentativas = 0;
+      document.getElementById('login-screen').classList.remove('visible');
+      mostrarTelaPin(temPin ? 'verificar' : 'setup');
+      // o restante do login continua em finalizarLoginAposPin(), chamado
+      // só depois do PIN ser confirmado com sucesso
     } else {
       _currentUser=null;
       if(_timerInatividade){ clearTimeout(_timerInatividade); _timerInatividade=null; }
       plantoes=[]; hospitais=[]; regras={}; perfil={nome:'',esp:'',email:'',senha:''};
+      esconderTelaPin();
       document.getElementById('login-screen').classList.add('visible');
       document.getElementById('login-loading').classList.remove('show');
     }
