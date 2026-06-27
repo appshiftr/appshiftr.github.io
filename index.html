@@ -5310,7 +5310,13 @@ function analisaRemoverImagem() {
 }
 
 // ✅ Inicia a análise — funciona com imagem, laboratório (arquivo/texto), ou os dois juntos
+// ✅ NOVO: trava contra clique duplo — evita disparar duas análises (e cobrar
+// dois créditos) se o médico clicar de novo rápido enquanto já está processando
+let _analiseEmAndamento = false;
+
 function analisaIniciarAnalise() {
+  if (_analiseEmAndamento) return; // ignora clique duplo
+
   const tipoExame = document.getElementById('tipoExameSelecionado').value;
   if (!tipoExame) {
     alert('⚠️ Por favor, selecione o tipo de exame antes de analisar.');
@@ -5333,7 +5339,8 @@ function analisaIniciarAnalise() {
   };
 
   analisaTipoExameSelecionado = tipoExame;
-  analisaProcessar();
+  _analiseEmAndamento = true;
+  analisaProcessar().finally(() => { _analiseEmAndamento = false; });
 }
 
 async function analisaProcessar() {
