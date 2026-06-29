@@ -4,6 +4,46 @@
 // ═══════════════════════════════════════════════════════════════
 
 import Anthropic from '@anthropic-ai/sdk';
+import crypto from 'crypto';
+
+// ✅ NOVO: Cache simples de deduplicação — se a MESMA análise (mesma imagem,
+// mesmo laboratório, mesmos campos) chegar de novo dentro de poucos minutos,
+// devolve a resposta já processada em vez de chamar a Claude de novo.
+// Protege contra retry de conexão instável: a Claude responde com sucesso,
+// mas a resposta não chega no celular (sinal fraco) — o usuário tenta de
+// novo, e sem isso, pagaríamos a chamada duas vezes pela mesma análise.
+//
+// ⚠️ Limitação real: isso vive na memória da função Vercel, que existe
+// enquanto a "instância" continuar ativa (a maioria dos retries rápidos,
+// na prática). Não sobrevive um "cold start" do Vercel — pra garantia 100%
+// independente disso, precisaria de um cache persistente (Firestore via
+// Admin SDK), que fica pra quando o backend de créditos for ativado.
+const cacheRespostas = new Map();
+const TTL_CACHE_MS = 5 * 60 * 1000; // 5 minutos
+
+function limparCacheAntigo() {
+  const agora = Date.now();
+  for (const [chave, valor] of cacheRespostas) {
+    if (agora - valor.timestamp > TTL_CACHE_MS) {
+      cacheRespostas.delete(chave);
+    }
+  }
+}
+
+function gerarHashRequisicao(body) {
+  const dadosRelevantes = JSON.stringify({
+    imagemBase64: body.imagemBase64 || null,
+    laboratorioBase64: body.laboratorioBase64 || null,
+    laboratorioTexto: body.laboratorioTexto || null,
+    tipo: body.tipo || null,
+    queixa: body.queixa || null,
+    sintomas: body.sintomas || null,
+    sinaisVitais: body.sinaisVitais || null,
+    medicamentos: body.medicamentos || null,
+    historico: body.historico || null
+  });
+  return crypto.createHash('sha256').update(dadosRelevantes).digest('hex');
+}
 
 export default async function handler(req, res) {
   // ✅ ADICIONAR HEADERS CORS
@@ -32,6 +72,15 @@ export default async function handler(req, res) {
       return res.status(400).json({ 
         erro: 'Informe ao menos uma imagem de exame OU dados de laboratório, além do tipo de exame.' 
       });
+    }
+
+    // ✅ Verifica se essa exata análise já foi processada recentemente
+    // (provável retry por falha de rede) — devolve sem cobrar de novo
+    limparCacheAntigo();
+    const hashReq = gerarHashRequisicao(req.body);
+    if (cacheRespostas.has(hashReq)) {
+      console.log('🔁 Requisição idêntica recebida de novo (provável retry por falha de rede) — devolvendo resposta já processada, SEM chamar a Claude de novo');
+      return res.status(200).json(cacheRespostas.get(hashReq).resposta);
     }
 
     // Verificar API Key
@@ -195,7 +244,7 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
     // RETORNAR RESPOSTA
     // ═══════════════════════════════════════════════════════════════
 
-    return res.status(200).json({
+    const respostaFinal = {
       sucesso: true,
       laudo: laudoCompleto,
       tipo: 'laudo_completo',
@@ -206,7 +255,14 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
         input: response.usage.input_tokens,
         output: response.usage.output_tokens
       }
-    });
+    };
+
+    // ✅ Guarda no cache ANTES de devolver — se a resposta se perder no
+    // caminho de volta (conexão da médica cair), o próximo retry com a
+    // mesma análise pega esse cache, sem chamar a Claude de novo
+    cacheRespostas.set(hashReq, { resposta: respostaFinal, timestamp: Date.now() });
+
+    return res.status(200).json(respostaFinal);
 
   } catch (erro) {
     console.error('❌ Erro COMPLETO na API:', {
