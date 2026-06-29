@@ -1798,6 +1798,23 @@ function logCusto(tokens, contexto, extra = {}){
   }
 }
 
+// ✅ NOVO: Registra cada login completo (depois de Google + email autorizado
+// + PIN confirmados) — pra mapear engajamento geral, não só uso de IA
+function logAcesso(uid){
+  try {
+    const { db, collection, doc, setDoc } = window._fb || {};
+    if (!db || !uid) return;
+    const ref = doc(collection(db, 'logs_acessos'));
+    setDoc(ref, {
+      uid,
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent
+    }).catch(() => {});
+  } catch (e) {
+    // nunca deixa o log de acesso causar outro erro
+  }
+}
+
 // Pega qualquer erro de JS não tratado em qualquer lugar do app
 window.addEventListener('error', (event) => {
   logErro('erro_global', event.error || new Error(event.message));
@@ -2155,6 +2172,7 @@ async function finalizarLoginAposPin(){
   if (!user) return;
   _currentUser = user;
   resetarTimerInatividade();
+  logAcesso(user.uid); // ✅ login completo (Google + email autorizado + PIN)
   if(user.photoURL){
     ['sb-avatar','tb-avatar'].forEach(id=>{
       const el=document.getElementById(id);

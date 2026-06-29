@@ -59,7 +59,7 @@ body{
 .card .valor.verde{color:var(--verde);}
 
 .tabela-wrap{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow-x:auto;}
-table{width:100%; border-collapse:collapse; font-size:12px; min-width:820px;}
+table{width:100%; border-collapse:collapse; font-size:12px; min-width:1020px;}
 th{
   text-align:left; padding:10px 12px; color:var(--text3); font-weight:600;
   text-transform:uppercase; font-size:10px; letter-spacing:0.5px;
@@ -98,6 +98,7 @@ tr:hover td{background:var(--surface2);}
     <div>
       <h1>Painel Admin — Shiftr</h1>
       <div class="sub" id="usuario-logado"></div>
+      <div class="sub" id="registro-desde" style="margin-top:2px;"></div>
     </div>
     <button class="btn-sair" onclick="sair()">Sair</button>
   </div>
@@ -130,6 +131,8 @@ tr:hover td{background:var(--surface2);}
           <th>Nome</th>
           <th>Email</th>
           <th>Status</th>
+          <th>Logins</th>
+          <th>Primeiro acesso</th>
           <th>Análises</th>
           <th>Tokens (in/out)</th>
           <th>Custo est.</th>
@@ -226,25 +229,55 @@ tr:hover td{background:var(--surface2);}
     document.getElementById('vazio').style.display = 'none';
 
     try {
-      const [usuariosSnap, custosSnap] = await Promise.all([
+      const [usuariosSnap, custosSnap, acessosSnap] = await Promise.all([
         getDocs(collection(db, 'usuarios')),
-        getDocs(collection(db, 'logs_custos'))
+        getDocs(collection(db, 'logs_custos')),
+        getDocs(collection(db, 'logs_acessos'))
       ]);
 
-      // Agrega uso por uid
+      // Agrega login por uid
+      const loginsPorUid = {};
+      acessosSnap.forEach(d => {
+        const dado = d.data();
+        const uid = dado.uid;
+        if (!uid) return;
+        if (!loginsPorUid[uid]) {
+          loginsPorUid[uid] = { totalLogins: 0, primeiroLogin: null, ultimoLogin: null };
+        }
+        loginsPorUid[uid].totalLogins++;
+        if (dado.timestamp && (!loginsPorUid[uid].primeiroLogin || dado.timestamp < loginsPorUid[uid].primeiroLogin)) {
+          loginsPorUid[uid].primeiroLogin = dado.timestamp;
+        }
+        if (dado.timestamp && (!loginsPorUid[uid].ultimoLogin || dado.timestamp > loginsPorUid[uid].ultimoLogin)) {
+          loginsPorUid[uid].ultimoLogin = dado.timestamp;
+        }
+      });
+
+      // Agrega uso por uid — guarda também cada análise individual
       const usoPorUid = {};
+      let registroMaisAntigo = null;
       custosSnap.forEach(d => {
         const dado = d.data();
         const uid = dado.uid;
         if (!uid) return;
         if (!usoPorUid[uid]) {
-          usoPorUid[uid] = { analises: 0, tokensInput: 0, tokensOutput: 0, ultima: null };
+          usoPorUid[uid] = { analises: 0, tokensInput: 0, tokensOutput: 0, ultima: null, entradas: [] };
         }
         usoPorUid[uid].analises++;
         usoPorUid[uid].tokensInput += dado.tokensInput || 0;
         usoPorUid[uid].tokensOutput += dado.tokensOutput || 0;
+        usoPorUid[uid].entradas.push({
+          timestamp: dado.timestamp || null,
+          contexto: dado.contexto || '—',
+          tipoExame: (dado.extra && dado.extra.tipoExame) || '—',
+          tokensInput: dado.tokensInput || 0,
+          tokensOutput: dado.tokensOutput || 0
+        });
         if (dado.timestamp && (!usoPorUid[uid].ultima || dado.timestamp > usoPorUid[uid].ultima)) {
           usoPorUid[uid].ultima = dado.timestamp;
+        }
+        if (dado.timestamp && (!registroMaisAntigo || dado.timestamp < registroMaisAntigo)) {
+          registroMaisAntigo = dado.timestamp;
         }
       });
 
@@ -253,15 +286,21 @@ tr:hover td{background:var(--surface2);}
         const dado = d.data();
         const uid = d.id;
         const perfil = dado.perfil || {};
-        const uso = usoPorUid[uid] || { analises: 0, tokensInput: 0, tokensOutput: 0, ultima: null };
+        const uso = usoPorUid[uid] || { analises: 0, tokensInput: 0, tokensOutput: 0, ultima: null, entradas: [] };
+        const login = loginsPorUid[uid] || { totalLogins: 0, primeiroLogin: null, ultimoLogin: null };
         medicos.push({
           uid,
+          login,
           nome: perfil.nome || '(sem nome)',
           email: perfil.email || '(sem email)',
           isento: !!dado.isento,
           ...uso
         });
       });
+
+      document.getElementById('registro-desde').textContent = registroMaisAntigo
+        ? 'Registro de custos disponível desde: ' + formatarData(registroMaisAntigo)
+        : 'Nenhum registro de custo encontrado ainda.';
 
       renderizarTabela(medicos);
       renderizarCards(medicos);
@@ -291,8 +330,12 @@ tr:hover td{background:var(--surface2);}
     } catch { return '—'; }
   }
 
+  // Guarda os dados carregados pra usar no toggle de detalhe sem recarregar
+  let medicosCarregados = [];
+
   function renderizarTabela(medicos){
     document.getElementById('carregando').style.display = 'none';
+    medicosCarregados = medicos;
 
     if (medicos.length === 0) {
       document.getElementById('vazio').style.display = 'block';
@@ -308,16 +351,65 @@ tr:hover td{background:var(--surface2);}
         <td>${m.nome}</td>
         <td>${m.email}</td>
         <td><span class="badge ${m.isento ? 'isento' : 'pagante'}">${m.isento ? 'Isento (teste)' : 'Pagante'}</span></td>
-        <td>${m.analises}</td>
+        <td>${m.login.totalLogins}</td>
+        <td>${formatarData(m.login.primeiroLogin)}</td>
+        <td>
+          ${m.analises}
+          ${m.analises > 0 ? `<button class="btn-toggle" style="margin-left:6px;" onclick="alternarDetalhe('${m.uid}')" id="btn-detalhe-${m.uid}">Ver análises</button>` : ''}
+        </td>
         <td>${m.tokensInput.toLocaleString('pt-BR')} / ${m.tokensOutput.toLocaleString('pt-BR')}</td>
         <td>R$ ${custoEstimadoBRL(m.tokensInput, m.tokensOutput).toFixed(2).replace('.', ',')}</td>
         <td>${formatarData(m.ultima)}</td>
         <td><button class="btn-toggle" onclick="alternarIsento('${m.uid}', ${m.isento})">${m.isento ? 'Tornar pagante' : 'Liberar (isentar)'}</button></td>
       </tr>
+      <tr id="detalhe-${m.uid}" style="display:none;">
+        <td colspan="10" style="background:var(--bg); padding:14px 12px;">
+          ${renderizarDetalheAnalises(m.entradas)}
+        </td>
+      </tr>
     `).join('');
 
     document.getElementById('tabela').style.display = 'table';
   }
+
+  function renderizarDetalheAnalises(entradas){
+    if (!entradas || entradas.length === 0) return '<span style="color:var(--text3);">Nenhuma análise registrada.</span>';
+
+    const ordenadas = [...entradas].sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+    return `
+      <table style="min-width:0;">
+        <thead>
+          <tr>
+            <th>Data/hora</th>
+            <th>Tipo de exame</th>
+            <th>Tokens entrada</th>
+            <th>Tokens saída</th>
+            <th>Custo est.</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${ordenadas.map(e => `
+            <tr>
+              <td>${formatarData(e.timestamp)}</td>
+              <td>${e.tipoExame}</td>
+              <td>${e.tokensInput.toLocaleString('pt-BR')}</td>
+              <td>${e.tokensOutput.toLocaleString('pt-BR')}</td>
+              <td>R$ ${custoEstimadoBRL(e.tokensInput, e.tokensOutput).toFixed(3).replace('.', ',')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  window.alternarDetalhe = function(uid){
+    const linha = document.getElementById('detalhe-' + uid);
+    const btn = document.getElementById('btn-detalhe-' + uid);
+    const aberta = linha.style.display !== 'none';
+    linha.style.display = aberta ? 'none' : 'table-row';
+    btn.textContent = aberta ? 'Ver análises' : 'Ocultar';
+  };
 
   window.alternarIsento = async function(uid, isentoAtual){
     const btn = event.target;
