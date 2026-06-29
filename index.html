@@ -1779,22 +1779,39 @@ function logErro(contexto, erro, extra = {}) {
 
 // ✅ NOVO: Registra o custo real (tokens) de cada análise no Firestore —
 // constrói histórico automático pra análise de viabilidade de preço
-function logCusto(tokens, contexto, extra = {}){
-  try {
-    const { db, collection, doc, setDoc } = window._fb || {};
-    if (!db || !tokens) return;
-    const ref = doc(collection(db, 'logs_custos'));
-    setDoc(ref, {
-      contexto,
-      modelo: 'claude-sonnet-4-6',
-      tokensInput: tokens.input || null,
-      tokensOutput: tokens.output || null,
-      uid: (window._fb?.auth?.currentUser?.uid) || null,
-      timestamp: new Date().toISOString(),
-      extra
-    }).catch(() => {});
-  } catch (e) {
-    // nunca deixa o log de custo causar outro erro
+// ✅ Reforçado: tenta gravar até 3 vezes (com pequena espera entre elas) —
+// e se mesmo assim falhar, guarda um registro de backup em logs_erros com
+// os MESMOS números de tokens, pra nunca perder o dado de custo em silêncio.
+async function logCusto(tokens, contexto, extra = {}){
+  if (!tokens) return;
+
+  const dados = {
+    contexto,
+    modelo: 'claude-sonnet-4-6',
+    tokensInput: tokens.input || null,
+    tokensOutput: tokens.output || null,
+    uid: (window._fb?.auth?.currentUser?.uid) || null,
+    timestamp: new Date().toISOString(),
+    extra
+  };
+
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    try {
+      const { db, collection, doc, setDoc } = window._fb || {};
+      if (!db) return;
+      const ref = doc(collection(db, 'logs_custos'));
+      await setDoc(ref, dados);
+      return; // sucesso, encerra
+    } catch (e) {
+      if (tentativa < 3) {
+        await new Promise(r => setTimeout(r, 800 * tentativa)); // espera um pouco mais a cada tentativa
+        continue;
+      }
+      // ✅ Esgotou as tentativas — guarda backup em logs_erros, preservando
+      // os tokens, pra não ficar invisível como já aconteceu antes
+      console.error('❌ Falha ao gravar logs_custos após 3 tentativas, salvando backup em logs_erros:', e);
+      logErro('log_custo_falhou', e, dados);
+    }
   }
 }
 
