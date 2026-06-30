@@ -1019,6 +1019,30 @@ textarea.analise-form-control {
 
 <!-- TOAST DE ATUALIZAÇÃO -->
 <div id="analise-print-area" style="display:none;"></div>
+
+<!-- MODAL DE COMPRA DE CRÉDITOS -->
+<div id="modal-comprar-creditos" style="display:none;position:fixed;inset:0;z-index:9997;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;max-width:380px;width:100%;">
+    <h2 style="font-size:16px;margin:0 0 0.3rem;color:var(--text);">💳 Comprar créditos</h2>
+    <p style="font-size:11px;color:var(--text3);margin:0 0 1rem;">Quanto mais créditos você compra de uma vez, menor o preço por análise.</p>
+
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1rem;" id="opcoes-creditos-rapidas"></div>
+
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:0.4rem;">Ou escolha outra quantidade:</label>
+      <input type="number" id="input-qtd-creditos" min="1" max="1000" placeholder="Ex: 25" oninput="atualizarPrecoCalculado()"
+        style="width:100%;padding:10px;border-radius:0.5rem;border:2px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;font-family:inherit;">
+      <div id="preco-calculado" style="font-size:12px;color:var(--text2);margin-top:6px;"></div>
+    </div>
+
+    <button class="analise-btn" onclick="iniciarCompraCreditos()" id="btn-confirmar-compra" style="margin-bottom:0.6rem;">
+      Ir para pagamento
+    </button>
+    <button class="analise-btn analise-btn-secondary" onclick="fecharModalComprarCreditos()">Cancelar</button>
+
+    <div id="erro-compra-creditos" style="display:none;color:var(--vermelho,#f25c5c);font-size:11px;margin-top:0.6rem;"></div>
+  </div>
+</div>
 <div id="toast-update" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9998;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;box-shadow:var(--shadow-lg);align-items:center;gap:12px;font-family:var(--mono);font-size:11px;color:var(--text);white-space:nowrap;">
   <span>🔄 Atualizando para a versão mais nova...</span>
 </div>
@@ -1471,8 +1495,9 @@ textarea.analise-form-control {
           <p style="font-size:12px;color:var(--text3);line-height:1.5;">Envie foto de Raio-X ou ECG. A IA Claude analisará junto com exames de lab e gerará laudo profissional.</p>
         </div>
 
-        <div id="analise-saldo-creditos" style="margin-bottom:1.5rem;padding:0.7rem 1rem;background:var(--surface2);border:1px solid var(--border);border-radius:0.5rem;font-size:13px;color:var(--text2);display:flex;align-items:center;gap:6px;">
-          💳 Créditos disponíveis: <strong id="analise-saldo-valor" style="color:var(--text);">—</strong>
+        <div id="analise-saldo-creditos" style="margin-bottom:1.5rem;padding:0.7rem 1rem;background:var(--surface2);border:1px solid var(--border);border-radius:0.5rem;font-size:13px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
+          <span>💳 Créditos disponíveis: <strong id="analise-saldo-valor" style="color:var(--text);">—</strong></span>
+          <button onclick="abrirModalComprarCreditos()" id="btn-comprar-creditos" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 12px;font-family:var(--mono);font-size:11px;font-weight:600;cursor:pointer;">+ Comprar créditos</button>
         </div>
 
         <!-- TIPO DE EXAME -->
@@ -5499,9 +5524,160 @@ async function analisaProcessar() {
 // e publique a regra do /creditos no Firestore — não precisa mudar mais nada.
 const CREDITOS_ATIVO = true;
 
+// ✅ NOVO: Sistema de compra de créditos (InfinitePay)
+// Mesma tabela de preço usada no backend — usada aqui só pra MOSTRAR o
+// preço estimado antes de confirmar; o preço real e definitivo é sempre
+// recalculado no servidor (criar-pagamento.js), nunca confiamos no que
+// o navegador calcula pra cobrar de verdade.
+function precoUnitarioEstimado(totalComprado) {
+  if (totalComprado < 20) return 1.50;
+  if (totalComprado < 30) return 1.30;
+  return 1.00;
+}
+
+let _totalCompradoAtual = 0; // atualizado por analisaAtualizarSaldo
+
+function montarOpcoesRapidas() {
+  const opcoes = [15, 20, 30, 50];
+  const container = document.getElementById('opcoes-creditos-rapidas');
+  if (!container) return;
+  container.innerHTML = opcoes.map(qtd => {
+    const preco = precoUnitarioEstimado(_totalCompradoAtual + qtd);
+    const total = (qtd * preco).toFixed(2).replace('.', ',');
+    return `<button class="analise-btn-secondary" onclick="selecionarQtdRapida(${qtd})" style="padding:10px;border-radius:0.5rem;border:2px solid var(--border);background:var(--surface2);color:var(--text);font-family:var(--mono);font-size:13px;cursor:pointer;text-align:left;display:flex;justify-content:space-between;">
+      <span>${qtd} créditos</span>
+      <strong>R$ ${total}</strong>
+    </button>`;
+  }).join('');
+}
+
+function selecionarQtdRapida(qtd) {
+  document.getElementById('input-qtd-creditos').value = qtd;
+  atualizarPrecoCalculado();
+}
+
+function atualizarPrecoCalculado() {
+  const input = document.getElementById('input-qtd-creditos');
+  const el = document.getElementById('preco-calculado');
+  const qtd = parseInt(input.value, 10);
+  if (!qtd || qtd < 1) { el.textContent = ''; return; }
+  const preco = precoUnitarioEstimado(_totalCompradoAtual + qtd);
+  const total = (qtd * preco).toFixed(2).replace('.', ',');
+  el.textContent = `R$ ${preco.toFixed(2).replace('.', ',')} por crédito — Total: R$ ${total}`;
+}
+
+async function abrirModalComprarCreditos() {
+  document.getElementById('erro-compra-creditos').style.display = 'none';
+  document.getElementById('input-qtd-creditos').value = '';
+  document.getElementById('preco-calculado').textContent = '';
+  montarOpcoesRapidas();
+  document.getElementById('modal-comprar-creditos').style.display = 'flex';
+}
+
+function fecharModalComprarCreditos() {
+  document.getElementById('modal-comprar-creditos').style.display = 'none';
+}
+
+async function iniciarCompraCreditos() {
+  const qtd = parseInt(document.getElementById('input-qtd-creditos').value, 10);
+  const erroEl = document.getElementById('erro-compra-creditos');
+  erroEl.style.display = 'none';
+
+  if (!qtd || qtd < 1) {
+    erroEl.textContent = 'Informe uma quantidade válida de créditos.';
+    erroEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('btn-confirmar-compra');
+  btn.disabled = true;
+  btn.textContent = 'Gerando link de pagamento...';
+
+  try {
+    const { auth } = window._fb;
+    const usuario = auth.currentUser;
+    const token = await usuario.getIdToken();
+
+    const response = await fetch('https://appshiftr-github-io.vercel.app/api/criar-pagamento', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ quantidade: qtd })
+    });
+
+    const dados = await response.json();
+
+    if (!response.ok) {
+      throw new Error(dados.erro || 'Erro ao gerar pagamento');
+    }
+
+    // ✅ Guarda o orderNsu localmente — usado pra verificar o pagamento
+    // quando o médico voltar do checkout (reforço além do webhook)
+    localStorage.setItem('shiftr_pagamento_pendente', dados.orderNsu);
+
+    // Leva o médico pro checkout da InfinitePay
+    window.location.href = dados.checkoutUrl;
+
+  } catch (e) {
+    console.error('Erro ao iniciar compra:', e);
+    erroEl.textContent = 'Erro: ' + e.message;
+    erroEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Ir para pagamento';
+  }
+}
+
+// ✅ Quando o médico volta do checkout da InfinitePay (redirect_url inclui
+// "?pagamento=confirmando"), confirma o pagamento como reforço — não
+// depende só do webhook, que pode atrasar
+async function verificarPagamentoPendenteAoVoltar() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('pagamento') !== 'confirmando') return;
+
+  const orderNsu = localStorage.getItem('shiftr_pagamento_pendente');
+  if (!orderNsu) return;
+
+  // Limpa a URL pra não ficar tentando de novo a cada reload
+  window.history.replaceState({}, '', window.location.pathname);
+
+  try {
+    const { auth } = window._fb;
+    await new Promise(resolve => {
+      const unsub = auth.onAuthStateChanged ? null : null;
+      if (auth.currentUser) return resolve();
+      setTimeout(resolve, 1500); // dá um tempo pro login restaurar, se precisar
+    });
+    const usuario = auth.currentUser;
+    if (!usuario) return;
+    const token = await usuario.getIdToken();
+
+    const response = await fetch('https://appshiftr-github-io.vercel.app/api/verificar-pagamento', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ orderNsu })
+    });
+    const dados = await response.json();
+
+    localStorage.removeItem('shiftr_pagamento_pendente');
+
+    if (dados.pago) {
+      alert(`✅ Pagamento confirmado! Novo saldo: ${dados.saldo} créditos.`);
+      analisaAtualizarSaldo();
+    } else {
+      alert('⏳ Pagamento ainda não confirmado. Se você já pagou, aguarde alguns instantes e recarregue a página — o saldo atualiza automaticamente assim que a confirmação chegar.');
+    }
+  } catch (e) {
+    console.error('Erro ao verificar pagamento pendente:', e);
+  }
+}
+
+window.addEventListener('load', () => {
+  setTimeout(verificarPagamentoPendenteAoVoltar, 1000);
+});
+
 async function analisaAtualizarSaldo() {
   const caixaSaldo = document.getElementById('analise-saldo-creditos');
   const elSaldo = document.getElementById('analise-saldo-valor');
+  const btnComprar = document.getElementById('btn-comprar-creditos');
   if (!elSaldo) return;
 
   if (!CREDITOS_ATIVO) {
@@ -5519,13 +5695,16 @@ async function analisaAtualizarSaldo() {
     const isento = usuarioSnap.exists() && usuarioSnap.data().isento === true;
     if (isento) {
       elSaldo.textContent = '∞ (isento)';
+      if (btnComprar) btnComprar.style.display = 'none'; // isento não precisa comprar
       return;
     }
+    if (btnComprar) btnComprar.style.display = 'block';
 
     const creditoSnap = await getDoc(doc(db, 'creditos', _currentUser.uid));
     // Se o documento ainda não existe, o médico nunca fez nenhuma análise —
     // o backend concede 3 créditos grátis automaticamente na primeira vez
     elSaldo.textContent = creditoSnap.exists() ? creditoSnap.data().saldo : 3;
+    _totalCompradoAtual = creditoSnap.exists() ? (creditoSnap.data().totalComprado || 0) : 0;
   } catch (e) {
     console.warn('Não foi possível carregar o saldo de créditos:', e);
     elSaldo.textContent = '—';
