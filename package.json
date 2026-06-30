@@ -10,7 +10,8 @@
     "deploy": "vercel --prod"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.24.3"
+    "@anthropic-ai/sdk": "^0.24.3",
+    "firebase-admin": "^12.0.0"
   },
   "devDependencies": {},
   "engines": {

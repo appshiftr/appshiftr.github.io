@@ -5,30 +5,44 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
+import admin from 'firebase-admin';
 
-// ✅ NOVO: Cache simples de deduplicação — se a MESMA análise (mesma imagem,
-// mesmo laboratório, mesmos campos) chegar de novo dentro de poucos minutos,
-// devolve a resposta já processada em vez de chamar a Claude de novo.
-// Protege contra retry de conexão instável: a Claude responde com sucesso,
-// mas a resposta não chega no celular (sinal fraco) — o usuário tenta de
-// novo, e sem isso, pagaríamos a chamada duas vezes pela mesma análise.
-//
-// ⚠️ Limitação real: isso vive na memória da função Vercel, que existe
-// enquanto a "instância" continuar ativa (a maioria dos retries rápidos,
-// na prática). Não sobrevive um "cold start" do Vercel — pra garantia 100%
-// independente disso, precisaria de um cache persistente (Firestore via
-// Admin SDK), que fica pra quando o backend de créditos for ativado.
-const cacheRespostas = new Map();
-const TTL_CACHE_MS = 5 * 60 * 1000; // 5 minutos
-
-function limparCacheAntigo() {
-  const agora = Date.now();
-  for (const [chave, valor] of cacheRespostas) {
-    if (agora - valor.timestamp > TTL_CACHE_MS) {
-      cacheRespostas.delete(chave);
-    }
-  }
+// ✅ NOVO: Firebase Admin SDK — usa as credenciais configuradas no Vercel
+// (Fase 1) pra ter acesso administrativo ao Firestore, ignorando as regras
+// normais. É isso que permite validar e debitar crédito de QUALQUER
+// usuário no servidor, sem o cliente nunca poder escrever em /creditos.
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      // No Vercel, quebras de linha da chave privada chegam como "\n" literal
+      privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n')
+    })
+  });
 }
+const db = admin.firestore();
+
+// ✅ Tabela de preço por faixa, baseada no TOTAL já comprado historicamente
+// pelo médico (não só nessa compra isolada) — ver Fase 6 (pagamento) pra
+// onde totalComprado é incrementado de verdade
+function precoUnitarioPorFaixa(totalComprado) {
+  if (totalComprado < 20) return 1.50;
+  if (totalComprado < 30) return 1.30;
+  return 1.00;
+}
+
+// ✅ Créditos grátis concedidos automaticamente na primeira análise de um
+// médico novo (sem isenção, sem nunca ter comprado crédito antes)
+const CREDITOS_GRATIS_INICIAIS = 3;
+
+// ✅ ATUALIZADO: cache de deduplicação agora é PERSISTENTE (Firestore via
+// Admin SDK), não mais em memória. Isso resolve o vazamento real que
+// identificamos nos testes (duas chamadas idênticas em horários bem
+// diferentes, cada uma cobrando de verdade) — o cache em memória só
+// protegia enquanto a função do Vercel continuasse "viva"; este aqui
+// protege sempre, independente de cold start.
+const TTL_CACHE_MS = 5 * 60 * 1000; // 5 minutos
 
 function gerarHashRequisicao(body) {
   const dadosRelevantes = JSON.stringify({
@@ -45,11 +59,57 @@ function gerarHashRequisicao(body) {
   return crypto.createHash('sha256').update(dadosRelevantes).digest('hex');
 }
 
+async function buscarCacheRequisicao(hash) {
+  const ref = db.collection('cache_analises').doc(hash);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const dado = snap.data();
+  if (Date.now() - dado.timestamp > TTL_CACHE_MS) return null; // expirado
+  return dado.resposta;
+}
+
+async function salvarCacheRequisicao(hash, resposta) {
+  await db.collection('cache_analises').doc(hash).set({
+    resposta,
+    timestamp: Date.now()
+  });
+}
+
+// ✅ Devolve 1 crédito — usado quando a análise falha DEPOIS de já ter
+// sido debitada (não cobra o médico por uma análise que não aconteceu)
+async function estornarCredito(creditoRef, uid) {
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(creditoRef);
+      const saldoAtual = snap.exists ? (snap.data().saldo || 0) : 0;
+      const novoSaldo = saldoAtual + 1;
+      tx.set(creditoRef, { saldo: novoSaldo }, { merge: true });
+      const historicoRef = creditoRef.collection('historico').doc();
+      tx.set(historicoRef, {
+        tipo: 'estorno',
+        quantidade: 1,
+        saldoApos: novoSaldo,
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    console.log(`↩️ Crédito estornado pro usuário ${uid} (análise falhou após débito)`);
+  } catch (err) {
+    console.error('❌ Falha ao estornar crédito:', err);
+  }
+}
+
 export default async function handler(req, res) {
   // ✅ ADICIONAR HEADERS CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // ✅ CORS restrito ao domínio oficial — uma cópia do index.html hospedada
+  // em outro domínio é bloqueada pelo próprio navegador do usuário.
+  // Authorization liberado pq o front volta a mandar o token Firebase.
+  const ORIGENS_PERMITIDAS = ['https://appshiftr.github.io'];
+  const origem = req.headers.origin;
+  if (ORIGENS_PERMITIDAS.includes(origem)) {
+    res.setHeader('Access-Control-Allow-Origin', origem);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   // ✅ Responder a preflight requests
   if (req.method === 'OPTIONS') {
@@ -61,7 +121,31 @@ export default async function handler(req, res) {
     return res.status(405).json({ erro: 'Método não permitido. Use POST.' });
   }
 
+  // ✅ Declaradas fora do try pra ficarem acessíveis no catch geral (estorno)
+  let uid = null;
+  let creditoRef = null;
+  let saldoApos = null;
+
   try {
+    // ═══════════════════════════════════════════════════════════════
+    // AUTENTICAÇÃO — exige token Firebase válido
+    // ═══════════════════════════════════════════════════════════════
+
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return res.status(401).json({ erro: 'Autenticação necessária. Faça login novamente.' });
+    }
+
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      uid = decoded.uid;
+    } catch (err) {
+      console.error('❌ Token inválido:', err.message);
+      return res.status(401).json({ erro: 'Sessão expirada. Faça login novamente.' });
+    }
+
     // Extrair dados do request
     const { imagemBase64, laboratorioBase64, laboratorioMimeType, laboratorioTexto, tipo, queixa, sintomas, sinaisVitais, medicamentos, historico } = req.body;
 
@@ -76,11 +160,89 @@ export default async function handler(req, res) {
 
     // ✅ Verifica se essa exata análise já foi processada recentemente
     // (provável retry por falha de rede) — devolve sem cobrar de novo
-    limparCacheAntigo();
     const hashReq = gerarHashRequisicao(req.body);
-    if (cacheRespostas.has(hashReq)) {
-      console.log('🔁 Requisição idêntica recebida de novo (provável retry por falha de rede) — devolvendo resposta já processada, SEM chamar a Claude de novo');
-      return res.status(200).json(cacheRespostas.get(hashReq).resposta);
+    const respostaCache = await buscarCacheRequisicao(hashReq);
+    if (respostaCache) {
+      console.log('🔁 Requisição idêntica recebida de novo (provável retry por falha de rede) — devolvendo resposta já processada, SEM chamar a Claude de novo e SEM debitar crédito');
+      return res.status(200).json(respostaCache);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // VERIFICAR E RESERVAR CRÉDITO — transação atômica no servidor
+    // (o cliente NUNCA decide se tem crédito; só o servidor decide)
+    // ═══════════════════════════════════════════════════════════════
+
+    const usuarioRef = db.collection('usuarios').doc(uid);
+    creditoRef = db.collection('creditos').doc(uid);
+    let isento = false;
+
+    try {
+      await db.runTransaction(async (tx) => {
+        const usuarioSnap = await tx.get(usuarioRef);
+        isento = usuarioSnap.exists && usuarioSnap.data().isento === true;
+
+        if (isento) {
+          return; // ✅ médico marcado como isento no painel admin — libera sem debitar nada
+        }
+
+        const creditoSnap = await tx.get(creditoRef);
+
+        if (!creditoSnap.exists) {
+          // ✅ Primeira análise desse médico (nunca teve documento de crédito
+          // antes) — concede os créditos grátis iniciais e já desconta 1
+          // pela análise que ele está fazendo agora
+          const saldoInicial = CREDITOS_GRATIS_INICIAIS - 1;
+          tx.set(creditoRef, {
+            saldo: saldoInicial,
+            totalComprado: 0, // grátis não conta como "comprado" pra faixa de preço
+            criadoEm: admin.firestore.FieldValue.serverTimestamp()
+          });
+          saldoApos = saldoInicial;
+
+          const historicoRef = creditoRef.collection('historico').doc();
+          tx.set(historicoRef, {
+            tipo: 'bonus_inicial',
+            quantidade: CREDITOS_GRATIS_INICIAIS,
+            saldoApos: CREDITOS_GRATIS_INICIAIS,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+          });
+          const historicoUsoRef = creditoRef.collection('historico').doc();
+          tx.set(historicoUsoRef, {
+            tipo: 'uso',
+            quantidade: -1,
+            saldoApos: saldoInicial,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+          });
+          return;
+        }
+
+        const saldoAtual = creditoSnap.data().saldo || 0;
+
+        if (saldoAtual <= 0) {
+          throw new Error('SALDO_INSUFICIENTE');
+        }
+
+        const novoSaldo = saldoAtual - 1;
+        tx.set(creditoRef, { saldo: novoSaldo }, { merge: true });
+        saldoApos = novoSaldo;
+
+        const historicoRef = creditoRef.collection('historico').doc();
+        tx.set(historicoRef, {
+          tipo: 'uso',
+          quantidade: -1,
+          saldoApos: novoSaldo,
+          timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+      });
+    } catch (err) {
+      if (err.message === 'SALDO_INSUFICIENTE') {
+        return res.status(402).json({
+          erro: 'Créditos insuficientes. Adicione créditos para continuar.',
+          semCreditos: true
+        });
+      }
+      console.error('❌ Erro ao verificar créditos:', err);
+      return res.status(500).json({ erro: 'Erro ao verificar créditos.' });
     }
 
     // Verificar API Key
@@ -88,6 +250,7 @@ export default async function handler(req, res) {
     console.log('🔑 API Key presente?', !!apiKey);
     if (!apiKey) {
       console.error('❌ ANTHROPIC_API_KEY não está configurada!');
+      if (!isento) await estornarCredito(creditoRef, uid);
       return res.status(500).json({ 
         erro: 'API Key não configurada no servidor' 
       });
@@ -251,16 +414,18 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
       truncado: foiTruncado,
       timestamp: new Date().toISOString(),
       modelo: 'claude-sonnet-4-6',
+      saldo: saldoApos, // ✅ null se isento — front já trata esse caso
       tokens: {
         input: response.usage.input_tokens,
         output: response.usage.output_tokens
       }
     };
 
-    // ✅ Guarda no cache ANTES de devolver — se a resposta se perder no
-    // caminho de volta (conexão da médica cair), o próximo retry com a
-    // mesma análise pega esse cache, sem chamar a Claude de novo
-    cacheRespostas.set(hashReq, { resposta: respostaFinal, timestamp: Date.now() });
+    // ✅ Guarda no cache PERSISTENTE antes de devolver — se a resposta se
+    // perder no caminho de volta (conexão da médica cair), o próximo retry
+    // com a mesma análise pega esse cache, sem chamar a Claude de novo e
+    // sem debitar crédito de novo
+    await salvarCacheRequisicao(hashReq, respostaFinal);
 
     return res.status(200).json(respostaFinal);
 
@@ -272,15 +437,21 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
       stack: erro.stack
     });
 
+    // ✅ A análise falhou DEPOIS de já termos debitado o crédito (se não
+    // isento) — devolve, pra não cobrar por uma análise que não aconteceu
+    if (typeof saldoApos === 'number') {
+      await estornarCredito(creditoRef, uid);
+    }
+
     // Erros específicos
-    if (erro.message.includes('401') || erro.status === 401) {
+    if (erro.message?.includes('401') || erro.status === 401) {
       return res.status(401).json({ 
         erro: 'API Key inválida ou expirada',
         detalhes: erro.message 
       });
     }
 
-    if (erro.message.includes('429') || erro.status === 429) {
+    if (erro.message?.includes('429') || erro.status === 429) {
       return res.status(429).json({ 
         erro: 'Limite de requisições atingido',
         detalhes: 'Aguarde um momento e tente novamente' 

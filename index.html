@@ -5471,6 +5471,7 @@ async function analisaProcessar() {
     });
 
     // Atualiza o saldo exibido com o valor que o servidor confirmou
+    // (dados.saldo vem null se o médico for isento — mantém o "∞ (isento)")
     if (typeof dados.saldo === 'number') {
       const elSaldo = document.getElementById('analise-saldo-valor');
       if (elSaldo) elSaldo.textContent = dados.saldo;
@@ -5496,7 +5497,7 @@ async function analisaProcessar() {
 // 🔒 Sistema de créditos ainda não publicado (Firestore rule + backend pausados
 // de propósito, fase de estabilização). Quando for ativar: troque pra `true`
 // e publique a regra do /creditos no Firestore — não precisa mudar mais nada.
-const CREDITOS_ATIVO = false;
+const CREDITOS_ATIVO = true;
 
 async function analisaAtualizarSaldo() {
   const caixaSaldo = document.getElementById('analise-saldo-creditos');
@@ -5512,11 +5513,19 @@ async function analisaAtualizarSaldo() {
   if (!_currentUser) { elSaldo.textContent = '—'; return; }
 
   try {
-    const ref = doc(db, 'creditos', _currentUser.uid);
-    const snap = await getDoc(ref);
-    // Se o documento ainda não existe, o usuário ainda não usou a Análise IA —
-    // o servidor concede os créditos grátis na primeira chamada.
-    elSaldo.textContent = snap.exists() ? snap.data().saldo : 3;
+    // ✅ Confere isenção primeiro — médico isento (marcado no painel admin)
+    // não tem "saldo" no sentido normal, é liberação ilimitada
+    const usuarioSnap = await getDoc(doc(db, 'usuarios', _currentUser.uid));
+    const isento = usuarioSnap.exists() && usuarioSnap.data().isento === true;
+    if (isento) {
+      elSaldo.textContent = '∞ (isento)';
+      return;
+    }
+
+    const creditoSnap = await getDoc(doc(db, 'creditos', _currentUser.uid));
+    // Se o documento ainda não existe, o médico nunca fez nenhuma análise —
+    // o backend concede 3 créditos grátis automaticamente na primeira vez
+    elSaldo.textContent = creditoSnap.exists() ? creditoSnap.data().saldo : 3;
   } catch (e) {
     console.warn('Não foi possível carregar o saldo de créditos:', e);
     elSaldo.textContent = '—';
