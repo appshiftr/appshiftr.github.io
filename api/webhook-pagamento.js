@@ -22,7 +22,7 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-const INFINITEPAY_HANDLE = 'uniquejalecoscrub';
+const INFINITEPAY_HANDLE = 'uniquejalecosescrub';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

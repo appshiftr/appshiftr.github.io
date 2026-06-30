@@ -16,7 +16,7 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-const INFINITEPAY_HANDLE = 'uniquejalecoscrub'; // ✅ InfiniteTag (sem o $)
+const INFINITEPAY_HANDLE = 'uniquejalecosescrub'; // ✅ InfiniteTag (sem o $)
 
 // ✅ Mesma tabela de preço usada em analisar-com-claude.js — mantenha as
 // duas em sincronia se for alterar os valores/faixas no futuro
