@@ -276,33 +276,72 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // CHAMAR GEMINI 2.5 FLASH
+    // CHAMAR GEMINI 2.5 FLASH — com retry automático em caso de
+    // sobrecarga temporária (503), comum no tier gratuito em horários
+    // de pico. Tenta até 3 vezes com espera crescente antes de desistir.
     // ═══════════════════════════════════════════════════════════════
     console.log('📤 Chamando Google Gemini 2.5 Flash...');
 
-    const geminiResp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: {
-            maxOutputTokens: 8192,
-            temperature: 0.3  // baixo pra respostas médicas mais consistentes
-          }
-        })
+    const requestBody = JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        maxOutputTokens: 8192,
+        temperature: 0.3
       }
-    );
+    });
 
-    if (!geminiResp.ok) {
+    let geminiResp = null;
+    let geminiData = null;
+    const MAX_TENTATIVAS = 3;
+
+    for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+      geminiResp = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody }
+      );
+
+      if (geminiResp.ok) {
+        geminiData = await geminiResp.json();
+        break;
+      }
+
+      const status = geminiResp.status;
       const detalhe = await geminiResp.text();
-      console.error('❌ Erro Gemini API:', geminiResp.status, detalhe);
+
+      // 503 = sobrecarga temporária — vale tentar de novo
+      if (status === 503 && tentativa < MAX_TENTATIVAS) {
+        console.warn(`⏳ Gemini 503 (tentativa ${tentativa}/${MAX_TENTATIVAS}) — aguardando antes de tentar novamente...`);
+        await new Promise(r => setTimeout(r, 2000 * tentativa)); // 2s, 4s
+        continue;
+      }
+
+      // Qualquer outro erro, ou esgotou as tentativas
+      console.error(`❌ Erro Gemini API (${status}):`, detalhe);
       if (!isento) await estornarCredito(creditoRef, uid);
-      return res.status(502).json({ erro: 'Erro ao chamar Gemini API.', detalhes: detalhe });
+
+      if (status === 503) {
+        return res.status(503).json({
+          erro: 'O serviço de IA está sobrecarregado no momento. Aguarde alguns segundos e tente novamente.',
+          detalhes: 'high_demand'
+        });
+      }
+      if (status === 429) {
+        return res.status(429).json({
+          erro: 'Limite de requisições atingido. Aguarde alguns instantes e tente novamente.'
+        });
+      }
+      return res.status(502).json({
+        erro: 'Erro ao chamar o serviço de IA. Tente novamente.',
+        detalhes: detalhe
+      });
     }
 
-    const geminiData = await geminiResp.json();
+    if (!geminiData) {
+      if (!isento) await estornarCredito(creditoRef, uid);
+      return res.status(503).json({
+        erro: 'O serviço de IA está sobrecarregado no momento. Aguarde alguns segundos e tente novamente.'
+      });
+    }
     console.log('✅ Resposta do Gemini recebida!');
 
     const laudoCompleto = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';

@@ -5486,7 +5486,18 @@ async function analisaProcessar() {
         analisaMostrarEtapa(etapaVolta);
         return;
       }
-      throw new Error(dados.detalhes ? `${dados.erro}: ${dados.detalhes}` : (dados.erro || 'Erro na análise'));
+      if (response.status === 503 || dados.detalhes === 'high_demand') {
+        alert('⏳ O serviço de IA está sobrecarregado no momento. Aguarde alguns segundos e tente novamente.');
+        analisaMostrarEtapa(etapaVolta);
+        return;
+      }
+      if (response.status === 429) {
+        alert('⏳ Limite de requisições atingido. Aguarde alguns instantes e tente novamente.');
+        analisaMostrarEtapa(etapaVolta);
+        return;
+      }
+      // Qualquer outro erro — mostra só a mensagem, sem o JSON técnico
+      throw new Error(dados.erro || 'Erro na análise. Tente novamente.');
     }
 
     // Guardar laudo completo
