@@ -5201,10 +5201,12 @@ async function analisarRX(canvas) {
 // ═══════════════════════════════════════════════════════════════
 
 // ✅ NOVO: Upload de exames de laboratório
-// ✅ NOVO: Redimensiona a imagem no navegador antes de enviar (máx 1568px,
-// que é o próprio limite ideal da Claude — evita erro 500 por imagem grande
-// demais pro Vercel/Anthropic aceitar, e ainda deixa a análise mais rápida)
-async function redimensionarImagem(file, maxDim = 1568, qualidade = 0.85) {
+// Redimensiona a imagem no navegador antes de enviar.
+// 1568px é o teto real que a Claude usa internamente — acima disso ela
+// redimensiona de qualquer forma, então mandar maior só aumenta custo sem
+// ganho de qualidade. A qualidade JPEG 0.92 preserva melhor as nuances de
+// cinza críticas em radiografia do que os 0.85 anteriores.
+async function redimensionarImagem(file, maxDim = 1568, qualidade = 0.92) {
   function desenharEExportar(source, larguraOriginal, alturaOriginal) {
     let width = larguraOriginal, height = alturaOriginal;
     if (width > maxDim || height > maxDim) {

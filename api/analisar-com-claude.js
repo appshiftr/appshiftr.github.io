@@ -71,7 +71,12 @@ async function buscarCacheRequisicao(hash) {
 async function salvarCacheRequisicao(hash, resposta) {
   await db.collection('cache_analises').doc(hash).set({
     resposta,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    // ✅ NOVO: campo de expiração pro TTL nativo do Firestore apagar
+    // automaticamente — o laudo em texto pode conter nome do paciente
+    // (se visível na imagem do exame), então não deve ficar retido
+    // indefinidamente, mesmo protegido por regra de acesso
+    expireAt: admin.firestore.Timestamp.fromMillis(Date.now() + 60 * 60 * 1000) // 1h
   });
 }
 
