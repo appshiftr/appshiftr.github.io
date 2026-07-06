@@ -1491,8 +1491,21 @@ textarea.analise-form-control {
       <!-- ETAPA 1: Upload -->
       <div id="analise-step-upload">
         <div style="margin-bottom:1.5rem;">
-          <h2 style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:0.5rem;">🔍 Análise com Claude Vision</h2>
-          <p style="font-size:12px;color:var(--text3);line-height:1.5;">Envie foto de Raio-X ou ECG. A IA Claude analisará junto com exames de lab e gerará laudo profissional.</p>
+          <h2 style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:0.5rem;">🔍 Análise com IA</h2>
+          <p style="font-size:12px;color:var(--text3);line-height:1.5;">Envie foto de Raio-X ou ECG. A IA analisará junto com exames de lab e gerará laudo profissional.</p>
+        </div>
+
+        <!-- SELETOR DE MODELO -->
+        <div style="margin-bottom:1rem;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;">Modelo de IA:</span>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;">
+            <input type="radio" name="modelo_ia" value="gemini" checked onchange="analisaModeloSelecionado='gemini'">
+            Gemini 2.5 Flash <span style="font-size:10px;color:var(--verde);">(recomendado)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;">
+            <input type="radio" name="modelo_ia" value="claude" onchange="analisaModeloSelecionado='claude'">
+            Claude Sonnet 4.6
+          </label>
         </div>
 
         <div id="analise-saldo-creditos" style="margin-bottom:1.5rem;padding:0.7rem 1rem;background:var(--surface2);border:1px solid var(--border);border-radius:0.5rem;font-size:13px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
@@ -4839,6 +4852,7 @@ window.gerarPDF            = gerarPDF;
 let analisaModel = null;
 let analisaImagemAtual = null;
 let analisaTipoExameSelecionado = null; // ✅ Tipo selecionado
+let analisaModeloSelecionado = 'gemini'; // ✅ Modelo de IA (gemini | claude)
 let analisaResultadosAtual = [];
 let analisaLaboratorioBase64 = null; // ✅ NOVO: Arquivo de laboratório
 let analisaLaboratorioMimeType = null; // ✅ NOVO: tipo real do arquivo (PDF ou imagem)
@@ -5201,15 +5215,14 @@ async function analisarRX(canvas) {
 // ═══════════════════════════════════════════════════════════════
 
 // ✅ NOVO: Upload de exames de laboratório
-// Redimensiona a imagem no navegador antes de enviar.
-// 1568px é o teto real que a Claude usa internamente — acima disso ela
-// redimensiona de qualquer forma, então mandar maior só aumenta custo sem
-// ganho de qualidade. A qualidade JPEG 0.92 preserva melhor as nuances de
-// cinza críticas em radiografia do que os 0.85 anteriores.
-async function redimensionarImagem(file, maxDim = 1568, qualidade = 0.92) {
+// ✅ Processa imagem antes de enviar — aplica rotação EXIF automaticamente.
+// Com Gemini: sem redimensionamento (a IA processa na resolução original,
+// o que melhora detecção de achados sutis como espessamento peribrônquico).
+// Com Claude: limite de 1568px (teto interno do modelo, acima não melhora).
+async function redimensionarImagem(file, maxDim = null, qualidade = 0.95) {
   function desenharEExportar(source, larguraOriginal, alturaOriginal) {
     let width = larguraOriginal, height = alturaOriginal;
-    if (width > maxDim || height > maxDim) {
+    if (maxDim && (width > maxDim || height > maxDim)) {
       const escala = Math.min(maxDim / width, maxDim / height);
       width = Math.round(width * escala);
       height = Math.round(height * escala);
@@ -5222,9 +5235,8 @@ async function redimensionarImagem(file, maxDim = 1568, qualidade = 0.92) {
   }
 
   // ✅ createImageBitmap com imageOrientation:'from-image' aplica a rotação
-  // EXIF da câmera automaticamente — sem isso, fotos que aparecem certas na
-  // galeria do celular podiam sair tortas/de lado depois de processadas
-  // (causa comum de ECG "em pé" na análise).
+  // EXIF da câmera automaticamente — sem isso, fotos tiradas na vertical
+  // podiam sair de lado depois de processadas (causa comum de ECG "em pé").
   if (window.createImageBitmap) {
     try {
       const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -5333,7 +5345,7 @@ function analisaUploadLaboratorio(e) {
     return;
   }
 
-  redimensionarImagem(file)
+  redimensionarImagem(file, analisaModeloSelecionado === 'claude' ? 1568 : null)
     .then(dataUrl => {
       analisaLaboratorioBase64 = dataUrl;
       analisaLaboratorioMimeType = 'image/jpeg';
@@ -5349,7 +5361,7 @@ function analisaUploadFile(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  redimensionarImagem(file)
+  redimensionarImagem(file, analisaModeloSelecionado === 'claude' ? 1568 : null)
     .then(dataUrl => {
       analisaImagemAtual = dataUrl;
       document.getElementById('analise-preview').innerHTML = `<img src="${dataUrl}">`;
@@ -5439,7 +5451,11 @@ async function analisaProcessar() {
       headers['Authorization'] = 'Bearer ' + (await usuario.getIdToken());
     }
 
-    const response = await fetch('https://appshiftr-github-io.vercel.app/api/analisar-com-claude', {
+    const endpoint = analisaModeloSelecionado === 'gemini'
+      ? 'https://appshiftr-github-io.vercel.app/api/analisar-com-gemini'
+      : 'https://appshiftr-github-io.vercel.app/api/analisar-com-claude';
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({
