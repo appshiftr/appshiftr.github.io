@@ -4123,10 +4123,15 @@ function setPage(p){
     document.getElementById('page-'+id).classList.toggle('active', id===p);
     document.getElementById('nav-'+id).classList.toggle('active', id===p);
   });
+
+  // ✅ Rola pro topo em qualquer troca de seção — cobre celular (window)
+  // e desktop (main-content que pode ter scroll próprio)
+  window.scrollTo({ top: 0, behavior: 'instant' });
+  const mc = document.querySelector('.main-content');
+  if (mc) mc.scrollTop = 0;
+
   if(p==='dash'){
     renderDashboard();
-    const mc=document.querySelector('.main-content');
-    if(mc) mc.scrollTop=0;
   }
   if(p==='cal'){
     scrollParaMesAtual();
