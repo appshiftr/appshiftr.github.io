@@ -1820,12 +1820,12 @@ function logErro(contexto, erro, extra = {}) {
 // ✅ Reforçado: tenta gravar até 3 vezes (com pequena espera entre elas) —
 // e se mesmo assim falhar, guarda um registro de backup em logs_erros com
 // os MESMOS números de tokens, pra nunca perder o dado de custo em silêncio.
-async function logCusto(tokens, contexto, extra = {}){
+async function logCusto(tokens, contexto, modelo, extra = {}){
   if (!tokens) return;
 
   const dados = {
     contexto,
-    modelo: 'claude-sonnet-4-6',
+    modelo: modelo || 'desconhecido', // ✅ usa o modelo real da resposta, não mais hardcoded
     tokensInput: tokens.input || null,
     tokensOutput: tokens.output || null,
     uid: (window._fb?.auth?.currentUser?.uid) || null,
@@ -5520,8 +5520,8 @@ async function analisaProcessar() {
       console.warn('⚠️ Laudo retornado incompleto (cortado por limite de tokens)');
     }
 
-    // ✅ Registra o custo real dessa análise — vira histórico pra decisão de preço
-    logCusto(dados.tokens, 'analise_ia', {
+    // ✅ Registra o custo real dessa análise — modelo vem da resposta do backend
+    logCusto(dados.tokens, 'analise_ia', dados.modelo, {
       tipoExame,
       teveImagem: !!analisaImagemAtual,
       teveLaboratorioArquivo: !!analisaLaboratorioBase64,

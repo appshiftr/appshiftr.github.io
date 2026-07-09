@@ -10,6 +10,7 @@
 
 import crypto from 'crypto';
 import admin from 'firebase-admin';
+import Anthropic from '@anthropic-ai/sdk';
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -335,12 +336,69 @@ Depois desse bloco abreviado de laboratório, escreva` : `Nessa seção, escreva
     }
 
     if (!geminiData) {
-      console.error('❌ Todos os modelos Gemini falharam');
-      if (!isento) await estornarCredito(creditoRef, uid);
-      return res.status(503).json({
-        erro: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns minutos.',
-        detalhes: 'all_models_failed'
-      });
+      console.warn('⚠️ Todos os modelos Gemini falharam — usando Claude Sonnet como último recurso');
+
+      const claudeApiKey = process.env.ANTHROPIC_API_KEY;
+      if (!claudeApiKey) {
+        if (!isento) await estornarCredito(creditoRef, uid);
+        return res.status(503).json({
+          erro: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns minutos.'
+        });
+      }
+
+      try {
+        const anthropic = new Anthropic({ apiKey: claudeApiKey });
+
+        // Monta as mensagens no formato Claude (igual ao analisar-com-claude.js)
+        const claudeParts = [];
+        claudeParts.push({ type: 'text', text: parts.find(p => p.text)?.text || '' });
+
+        if (imagemBase64) {
+          claudeParts.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imagemBase64 } });
+        }
+        if (laboratorioBase64) {
+          claudeParts.push({ type: 'text', text: 'Exame de laboratório:' });
+          if (laboratorioMimeType === 'application/pdf') {
+            claudeParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: laboratorioBase64 } });
+          } else {
+            claudeParts.push({ type: 'image', source: { type: 'base64', media_type: laboratorioMimeType || 'image/jpeg', data: laboratorioBase64 } });
+          }
+        }
+
+        const claudeResp = await anthropic.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 4096,
+          messages: [{ role: 'user', content: claudeParts }]
+        });
+
+        const laudoCompleto = claudeResp.content?.[0]?.text || '';
+        if (!laudoCompleto) throw new Error('Claude retornou resposta vazia');
+
+        const respostaFinal = {
+          sucesso: true,
+          laudo: laudoCompleto,
+          tipo: 'laudo_completo',
+          truncado: claudeResp.stop_reason === 'max_tokens',
+          timestamp: new Date().toISOString(),
+          modelo: 'claude-sonnet-4-6',
+          saldo: saldoApos,
+          tokens: {
+            input: claudeResp.usage.input_tokens,
+            output: claudeResp.usage.output_tokens
+          }
+        };
+
+        await salvarCacheRequisicao(hashReq, respostaFinal);
+        console.log('✅ Resposta recebida via Claude Sonnet (fallback final)');
+        return res.status(200).json(respostaFinal);
+
+      } catch (claudeErro) {
+        console.error('❌ Claude também falhou:', claudeErro.message);
+        if (!isento) await estornarCredito(creditoRef, uid);
+        return res.status(503).json({
+          erro: 'O serviço de IA está temporariamente indisponível. Tente novamente em alguns minutos.'
+        });
+      }
     }
     console.log(`✅ Resposta recebida via ${modeloUsado}!`);
 
