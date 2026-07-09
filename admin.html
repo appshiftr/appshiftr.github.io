@@ -279,6 +279,7 @@ tr:hover td{background:var(--surface2);}
           timestamp: dado.timestamp || null,
           contexto: dado.contexto || '—',
           tipoExame: (dado.extra && dado.extra.tipoExame) || '—',
+          modelo: dado.modelo || '—',
           tokensInput: dado.tokensInput || 0,
           tokensOutput: dado.tokensOutput || 0
         });
@@ -476,6 +477,25 @@ tr:hover td{background:var(--surface2);}
     document.getElementById('tabela').style.display = 'table';
   }
 
+  function corModelo(modelo) {
+    if (!modelo || modelo === '—') return 'var(--text3)';
+    if (modelo.includes('gemini-2.5')) return '#4db8ff';
+    if (modelo.includes('gemini-3.1')) return '#a78bfa';
+    if (modelo.includes('gemini-3'))   return '#7dd3fc';
+    if (modelo.includes('gemini'))     return '#38bdf8';
+    if (modelo.includes('claude'))     return '#c084fc';
+    return 'var(--text2)';
+  }
+
+  function nomeModelo(modelo) {
+    if (!modelo || modelo === '—') return '—';
+    if (modelo === 'claude-sonnet-4-6') return 'Claude Sonnet';
+    if (modelo === 'gemini-2.5-flash') return 'Gemini 2.5 Flash';
+    if (modelo === 'gemini-3-flash') return 'Gemini 3 Flash';
+    if (modelo === 'gemini-3.1-flash-lite') return 'Gemini 3.1 Lite';
+    return modelo;
+  }
+
   function renderizarDetalheAnalises(entradas){
     if (!entradas || entradas.length === 0) return '<span style="color:var(--text3);">Nenhuma análise registrada.</span>';
 
@@ -487,6 +507,7 @@ tr:hover td{background:var(--surface2);}
           <tr>
             <th>Data/hora</th>
             <th>Tipo de exame</th>
+            <th>Modelo IA</th>
             <th>Tokens entrada</th>
             <th>Tokens saída</th>
             <th>Custo est.</th>
@@ -497,6 +518,7 @@ tr:hover td{background:var(--surface2);}
             <tr>
               <td>${formatarData(e.timestamp)}</td>
               <td>${e.tipoExame}</td>
+              <td style="color:${corModelo(e.modelo)};font-weight:600;">${nomeModelo(e.modelo)}</td>
               <td>${e.tokensInput.toLocaleString('pt-BR')}</td>
               <td>${e.tokensOutput.toLocaleString('pt-BR')}</td>
               <td>R$ ${custoEstimadoBRL(e.tokensInput, e.tokensOutput).toFixed(3).replace('.', ',')}</td>
