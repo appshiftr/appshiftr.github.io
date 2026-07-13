@@ -5220,9 +5220,10 @@ async function analisarRX(canvas) {
 // ═══════════════════════════════════════════════════════════════
 
 // ✅ NOVO: Upload de exames de laboratório
-// ✅ Processa imagem antes de enviar — aplica rotação EXIF automaticamente.
-// Com Gemini: sem redimensionamento (a IA processa na resolução original,
-// o que melhora detecção de achados sutis como espessamento peribrônquico).
+// Processa imagem antes de enviar — aplica rotação EXIF automaticamente.
+// Com Gemini: limite de 2048px (maior que Claude, mantém mais detalhe pra
+// achados sutis, e ainda fica dentro do limite de 4.5MB do Vercel —
+// foto de iPhone sem limite vira 6-10MB em base64 e causa "Load failed" no iOS).
 // Com Claude: limite de 1568px (teto interno do modelo, acima não melhora).
 async function redimensionarImagem(file, maxDim = null, qualidade = 0.95) {
   function desenharEExportar(source, larguraOriginal, alturaOriginal) {
@@ -5367,7 +5368,7 @@ function analisaUploadLaboratorio(e) {
     return;
   }
 
-  redimensionarImagem(file, analisaModeloSelecionado === 'claude' ? 1568 : null)
+  redimensionarImagem(file, analisaModeloSelecionado === 'claude' ? 1568 : 2048)
     .then(dataUrl => {
       analisaLaboratorioBase64 = dataUrl;
       analisaLaboratorioMimeType = 'image/jpeg';
@@ -5389,7 +5390,7 @@ function analisaUploadFile(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  redimensionarImagem(file, analisaModeloSelecionado === 'claude' ? 1568 : null)
+  redimensionarImagem(file, analisaModeloSelecionado === 'claude' ? 1568 : 2048)
     .then(dataUrl => {
       analisaImagemAtual = dataUrl;
       document.getElementById('analise-preview').innerHTML = `<img src="${dataUrl}">`;
