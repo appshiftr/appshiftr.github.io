@@ -5289,6 +5289,12 @@ function analisaGirarImagem() {
 // problema de colunas embaralhadas em tabelas de laboratório (ex: hemograma
 // com % numa coluna e valor absoluto noutra).
 async function extrairTextoPDF(file) {
+  // ✅ Verifica se o pdf.js carregou corretamente — no iOS Safari
+  // o Worker pode falhar silenciosamente
+  if (!window.pdfjsLib) {
+    throw new Error('pdf.js não disponível neste navegador');
+  }
+
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   let textoCompleto = '';
@@ -5327,7 +5333,6 @@ function analisaUploadLaboratorio(e) {
     extrairTextoPDF(file)
       .then(texto => {
         if (texto && texto.length > 30) {
-          // ✅ Extração funcionou — usa texto (muito mais barato que mandar o PDF inteiro)
           document.getElementById('paciente-laboratorio-texto').value = texto;
           analisaLaboratorioBase64 = null;
           analisaLaboratorioMimeType = null;
@@ -5339,11 +5344,23 @@ function analisaUploadLaboratorio(e) {
       .catch(err => {
         // PDF escaneado/sem camada de texto — manda o arquivo original (mais caro, mas funciona)
         console.warn('Não foi possível extrair texto do PDF, enviando arquivo original:', err);
+        logErro('extracao_pdf_falhou', err, {
+          fileName: file?.name,
+          fileSize: file?.size,
+          userAgent: navigator.userAgent
+        });
         const reader = new FileReader();
         reader.onload = (ev) => {
           analisaLaboratorioBase64 = ev.target.result;
           analisaLaboratorioMimeType = 'application/pdf';
           document.getElementById('laboratorio-nome').textContent = `✓ ${file.name} (PDF sem texto — enviado como documento)`;
+        };
+        reader.onerror = (err) => {
+          logErro('leitura_pdf_falhou', new Error('FileReader falhou'), {
+            fileName: file?.name,
+            userAgent: navigator.userAgent
+          });
+          alert('Não foi possível ler esse arquivo PDF. Tente outro.');
         };
         reader.readAsDataURL(file);
       });
@@ -5358,6 +5375,12 @@ function analisaUploadLaboratorio(e) {
     })
     .catch(err => {
       console.error('Erro ao processar laboratório:', err);
+      logErro('upload_laboratorio', err, {
+        fileName: file?.name,
+        fileType: file?.type,
+        fileSize: file?.size,
+        userAgent: navigator.userAgent
+      });
       alert('Não foi possível processar esse arquivo. Tente outro.');
     });
 }
@@ -5375,6 +5398,12 @@ function analisaUploadFile(e) {
     })
     .catch(err => {
       console.error('Erro ao processar imagem:', err);
+      logErro('upload_imagem', err, {
+        fileName: file?.name,
+        fileType: file?.type,
+        fileSize: file?.size,
+        userAgent: navigator.userAgent
+      });
       alert('Não foi possível processar essa imagem. Tente outra foto.');
     });
 }
