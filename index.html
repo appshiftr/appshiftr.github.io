@@ -2235,6 +2235,22 @@ async function finalizarLoginAposPin(){
     });
   }
   if(!perfil.nome && user.displayName){ perfil.nome=user.displayName; perfil.email=user.email||''; }
+
+  // ✅ Garante que nome e email do Google ficam no Firestore mesmo que o
+  // médico nunca preencha o perfil manualmente — resolve o "(sem nome)"
+  // e "(sem email)" que aparece no painel admin pra novos usuários
+  try {
+    const { db, doc, setDoc } = window._fb;
+    await setDoc(doc(db, 'usuarios', user.uid), {
+      perfil: {
+        nome: user.displayName || '',
+        email: user.email || ''
+      }
+    }, { merge: true });
+  } catch(e) {
+    console.warn('Não foi possível salvar perfil mínimo do Google:', e);
+  }
+
   await carregarDoFirestore(user.uid);
 }
 

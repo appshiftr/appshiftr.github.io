@@ -298,11 +298,17 @@ tr:hover td{background:var(--surface2);}
         const perfil = dado.perfil || {};
         const uso = usoPorUid[uid] || { analises: 0, tokensInput: 0, tokensOutput: 0, ultima: null, entradas: [] };
         const login = loginsPorUid[uid] || { totalLogins: 0, primeiroLogin: null, ultimoLogin: null };
+
+        // ✅ Tenta pegar nome/email de diferentes lugares — cobre usuários
+        // que nunca preencheram o perfil manualmente
+        const nome = perfil.nome || dado.nome || '(sem nome)';
+        const email = perfil.email || dado.email || '(sem email)';
+
         medicos.push({
           uid,
           login,
-          nome: perfil.nome || '(sem nome)',
-          email: perfil.email || '(sem email)',
+          nome,
+          email,
           isento: !!dado.isento,
           ...uso
         });
